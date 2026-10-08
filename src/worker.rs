@@ -67,13 +67,7 @@ fn run(shared: Shared, rx: Receiver<Cmd>) {
         }
         let mut st = shared.lock().unwrap();
         let mut sessions: Vec<Session> = live.values().cloned().collect();
-        sessions.sort_by(|a, b| {
-            rank(&a.status).cmp(&rank(&b.status)).then_with(|| {
-                // Idle: a session that just finished goes to the top; the others keep their order.
-                if a.status == "idle" && b.status == "idle" { b.since_ms.cmp(&a.since_ms) } else { std::cmp::Ordering::Equal }
-            })
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-        });
+        state::sort_sessions(&mut sessions);
         st.sessions = sessions;
         st.version += 1;
         for mut event in events {
@@ -89,14 +83,6 @@ fn run(shared: Shared, rx: Receiver<Cmd>) {
             event.fired = fired.join("; ");
             st.log(event);
         }
-    }
-}
-
-fn rank(status: &str) -> u8 {
-    match status {
-        "waiting" => 0,
-        "busy" => 1,
-        _ => 2,
     }
 }
 
@@ -243,7 +229,13 @@ fn parse(v: &Value) -> Option<Session> {
         pid,
         name,
         title,
-        status: v.get("status").and_then(Value::as_str).unwrap_or("idle").to_string(),
+        // Claude Code's statuses: busy, shell (running a shell command, which its own UI shows as
+        // working), idle, waiting.
+        status: match v.get("status").and_then(Value::as_str).unwrap_or("idle") {
+            "shell" => "busy",
+            s => s,
+        }
+        .to_string(),
         waiting_for: text("waitingFor"),
         cwd,
         since_ms: v.get("statusUpdatedAt").and_then(Value::as_u64).unwrap_or(0),

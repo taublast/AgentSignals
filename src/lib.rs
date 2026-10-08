@@ -362,6 +362,13 @@ fn sync(app: &mut App, cx: &mut Cx) {
 static STARTED: OnceLock<(Shared, Sender<Cmd>)> = OnceLock::new();
 
 pub fn run() {
+    // A release build has no console: a panic would vanish with the process. Keep it in a file.
+    std::panic::set_hook(Box::new(|info| {
+        let text = format!("--- {} ms\n{info}\n{}\n", state::now_ms(), std::backtrace::Backtrace::force_capture());
+        let _ = std::fs::create_dir_all(state::data_dir());
+        let log = std::fs::OpenOptions::new().create(true).append(true).open(state::data_dir().join("crash.log"));
+        let _ = log.and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()));
+    }));
     let Some(listener) = http::bind() else {
         // Already running: wave from the running one instead.
         http::poke_running();
