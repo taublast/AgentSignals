@@ -211,10 +211,10 @@ fn section(title: &str) -> Build<SkiaLabel> {
 
 fn status_color(status: &str) -> Color {
     match status {
-        // Semaphore: red asks you something, yellow works, green is free.
+        // Semaphore: red asks you something, yellow works, dark green is free.
         "waiting" => hex(0xEF4444),
         "busy" => hex(0xFACC15),
-        _ => hex(0x22C55E),
+        _ => hex(0x006400), // darkgreen: idle is the quiet state
     }
 }
 
