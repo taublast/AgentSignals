@@ -11,7 +11,7 @@ HTTP API ("every time api-server finishes, play a sound").
 - **Rules** fire signals on events; they persist in `%APPDATA%\AgentSignals\rules.json`.
 - **Semaphore**: red = waiting for you (a question, a permission dialog), yellow = working, green = idle.
   Order: waiting, working, then idle with the session that finished last on top.
-- **Row emoji**: ⚙️ working, ✋ needs you, 💤 idle; after the name 🔊 speech, 🔔 sound, 💬 toast rules.
+- **Row emoji**: ⚙️ working, ✋ needs you, none when idle; after the name 🔊 speech, 🔔 sound, 💬 toast rules.
 - **Click a session** to select its Windows Terminal tab and bring the window forward.
 - **Right-click a session** (or Menu key): copy its name, turn "<name> finished" announcements on or
   off, or close its terminal tab after a confirm

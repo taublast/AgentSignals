@@ -280,12 +280,13 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                 .observe(move |me, app: &App| {
                     let Some(s) = app.session(pid) else { return };
                     me.set_text_color(if s.status == "idle" { hex(0x6B7280) } else { status_color(&s.status) });
+                    // Idle needs no icon: the green dot says it.
                     let icon = match s.status.as_str() {
-                        "busy" => "⚙️",
-                        "waiting" => "✋",
-                        _ => "💤",
+                        "busy" => "⚙️ ",
+                        "waiting" => "✋ ",
+                        _ => "",
                     };
-                    me.set_text(format!("{icon} {}", state::age(app.now.saturating_sub(s.since_ms))));
+                    me.set_text(format!("{icon}{}", state::age(app.now.saturating_sub(s.since_ms))));
                 }),
         ))
 }
