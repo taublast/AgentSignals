@@ -67,7 +67,13 @@ fn run(shared: Shared, rx: Receiver<Cmd>) {
         }
         let mut st = shared.lock().unwrap();
         let mut sessions: Vec<Session> = live.values().cloned().collect();
-        sessions.sort_by(|a, b| rank(&a.status).cmp(&rank(&b.status)).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+        sessions.sort_by(|a, b| {
+            rank(&a.status).cmp(&rank(&b.status)).then_with(|| {
+                // Idle: a session that just finished goes to the top; the others keep their order.
+                if a.status == "idle" && b.status == "idle" { b.since_ms.cmp(&a.since_ms) } else { std::cmp::Ordering::Equal }
+            })
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
         st.sessions = sessions;
         st.version += 1;
         for mut event in events {

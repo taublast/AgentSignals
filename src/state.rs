@@ -171,6 +171,21 @@ impl State {
         self.version += 1;
     }
 
+    /// Turns the "<name> finished" announcement on or off: on adds a rule; off takes the speech
+    /// out of the session's own `finished` rules and drops the ones left with nothing to do.
+    pub fn set_announce(&mut self, name: &str, on: bool) {
+        if on {
+            let say = Action { say: Some("{name} finished".into()), ..Action::default() };
+            self.add_rule(Rule { id: 0, session: name.into(), on: "finished".into(), action: say, once: false, min_busy_s: 0.0 });
+            return;
+        }
+        for r in self.rules.iter_mut().filter(|r| r.session.eq_ignore_ascii_case(name) && r.on == "finished") {
+            r.action.say = None;
+        }
+        self.rules.retain(|r| !r.action.is_empty());
+        self.save_rules();
+    }
+
     pub fn note(&self, name: &str) -> &str {
         self.notes.get(&name.to_lowercase()).map_or("", |s| s.as_str())
     }
@@ -216,6 +231,27 @@ pub fn diff(old: &HashMap<u32, Session>, new: &HashMap<u32, Session>, now: u64) 
     }
     events.sort_by_key(|e| e.pid);
     events
+}
+
+/// What the rules do for a session, shown after its name: 🔊 speech, 🔔 sound, 💬 toast.
+pub fn rule_icons(rules: &[Rule], name: &str) -> String {
+    let mine: Vec<&Rule> = rules.iter().filter(|r| r.session == "*" || r.session.eq_ignore_ascii_case(name)).collect();
+    let mut icons = String::new();
+    for (has, icon) in [
+        (mine.iter().any(|r| r.action.say.is_some()), "🔊"),
+        (mine.iter().any(|r| r.action.sound.is_some()), "🔔"),
+        (mine.iter().any(|r| r.action.toast.is_some()), "💬"),
+    ] {
+        if has {
+            icons.push_str(icon);
+        }
+    }
+    icons
+}
+
+/// A rule of the session's own speaks when it finishes (the menu's announce toggle).
+pub fn announcing(rules: &[Rule], name: &str) -> bool {
+    rules.iter().any(|r| r.session.eq_ignore_ascii_case(name) && r.on == "finished" && r.action.say.is_some())
 }
 
 /// `{name}` and `{waiting}` filled in.
@@ -272,5 +308,17 @@ mod tests {
         assert!(rule("Api-Server", 3.0).matches("api-server", &e));
         assert!(!rule("api-server", 5.0).matches("api-server", &e));
         assert!(!rule("build-bot", 0.0).matches("api-server", &e));
+    }
+
+    #[test]
+    fn icons() {
+        let rule = |session: &str, on: &str, action: Action| Rule { id: 1, session: session.into(), on: on.into(), action, once: false, min_busy_s: 0.0 };
+        let say = Action { say: Some("{name} finished".into()), ..Action::default() };
+        let sound = Action { sound: Some("tada".into()), ..Action::default() };
+        let rules = vec![rule("api-server", "finished", say), rule("*", "waiting", sound)];
+        assert_eq!(rule_icons(&rules, "API-Server"), "🔊🔔");
+        assert_eq!(rule_icons(&rules, "build-bot"), "🔔");
+        assert!(announcing(&rules, "api-server"));
+        assert!(!announcing(&rules, "build-bot"));
     }
 }

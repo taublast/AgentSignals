@@ -141,6 +141,25 @@ fn menu_overlay() -> Build<SkiaLayout> {
                             cx.set_clipboard(m.name);
                         }
                     }),
+                    SkiaShape::new()
+                        .corner_radius(6)
+                        .fill_x()
+                        .padding((12, 9, 12, 9))
+                        .accessibility_role(Aria::MENU_ITEM)
+                        .accessibility_label("Announce when finished")
+                        .animation_tapped(SkiaTouchAnimation::Ripple)
+                        .on_tapped(|_me, app: &mut App, cx| {
+                            if let Some(m) = app.menu.take() {
+                                let on = !state::announcing(&app.rules, &m.name);
+                                app.shared.lock().unwrap().set_announce(&m.name, on);
+                                sync(app, cx);
+                            }
+                        })
+                        .children((label("", 14).observe(|me, app: &App| {
+                            if let Some(m) = &app.menu {
+                                me.set_text(if state::announcing(&app.rules, &m.name) { "🔇 Stop announcing" } else { "🔊 Announce when finished" });
+                            }
+                        }),)),
                     menu_item("Close session", |app, _cx| {
                         if let Some(m) = &mut app.menu {
                             m.confirm = true;
@@ -181,8 +200,9 @@ fn menu_item(text: &str, action: fn(&mut App, &mut Cx)) -> Build<SkiaShape> {
         .children((label(text, 14),))
 }
 
+/// Emoji (status, rule icons, agents' notes) come from the system's emoji font.
 fn label(text: &str, size: i32) -> Build<SkiaLabel> {
-    SkiaLabel::new(text).font_size(size).text_color(hex(0xE5E7EB))
+    SkiaLabel::new(text).font_size(size).text_color(hex(0xE5E7EB)).system_font_fallback(true)
 }
 
 fn section(title: &str) -> Build<SkiaLabel> {
@@ -232,7 +252,10 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                 .vertical_options(LayoutOptions::Center)
                 .observe(move |me, app: &App| me.set_background_color(status_color(app.session(pid).map_or("", |s| &s.status)))),
             SkiaStack::new().margin((22, 0, 84, 0)).spacing(2).children((
-                label(&name, 15).text_color(Color::WHITE),
+                label(&name, 15).text_color(Color::WHITE).observe(move |me, app: &App| {
+                    let icons = state::rule_icons(&app.rules, &name);
+                    me.set_text(if icons.is_empty() { name.clone() } else { format!("{name}  {icons}") });
+                }),
                 label("", 12).text_color(hex(0x9CA3AF)).max_lines(2).observe(move |me, app: &App| {
                     let Some(s) = app.session(pid) else { return };
                     let note = app.notes.get(&s.name.to_lowercase()).map_or("", |n| n.as_str());
@@ -257,7 +280,12 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                 .observe(move |me, app: &App| {
                     let Some(s) = app.session(pid) else { return };
                     me.set_text_color(if s.status == "idle" { hex(0x6B7280) } else { status_color(&s.status) });
-                    me.set_text(format!("{} {}", s.status, state::age(app.now.saturating_sub(s.since_ms))));
+                    let icon = match s.status.as_str() {
+                        "busy" => "⚙️",
+                        "waiting" => "✋",
+                        _ => "💤",
+                    };
+                    me.set_text(format!("{icon} {}", state::age(app.now.saturating_sub(s.since_ms))));
                 }),
         ))
 }
@@ -294,6 +322,13 @@ fn recent(app: &App) -> String {
 /// Copies the shared state once a second; rows are rebuilt only when the list changed.
 fn tick(app: &mut App, cx: &mut Cx) {
     app.now = state::now_ms();
+    sync(app, cx);
+    let root = app.root;
+    cx.after(root, TICK_MS, tick);
+}
+
+/// Copies the shared state when it changed; rebuilds the rows whose list changed.
+fn sync(app: &mut App, cx: &mut Cx) {
     let shared = app.shared.clone();
     let st = shared.lock().unwrap();
     if st.version != app.seen {
@@ -321,8 +356,6 @@ fn tick(app: &mut App, cx: &mut Cx) {
             app.rule_key = key;
         }
     }
-    let root = app.root;
-    cx.after(root, TICK_MS, tick);
 }
 
 static STARTED: OnceLock<(Shared, Sender<Cmd>)> = OnceLock::new();
