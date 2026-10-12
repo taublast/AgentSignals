@@ -392,7 +392,7 @@ pub fn run() {
         };
         Box::new(
             Ui::new(app, build)
-                .font("Default", "assets/OpenSans-Regular.ttf")
+                .font_bytes("Default", include_bytes!("../assets/OpenSans-Regular.ttf"))
                 .background(hex(0x12141C))
                 .on_key_down(|app, key, _cx| {
                     let close = key.key == "Escape" && app.menu.is_some();

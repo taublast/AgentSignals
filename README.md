@@ -82,9 +82,13 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 Windows 10 or 11. Selecting and closing terminal tabs needs Windows Terminal; the list and the
 signals work with any terminal.
 
-## Build and run
+## Download
 
-There is no prebuilt exe: you build it from this source.
+[Releases](https://github.com/taublast/AgentSignals/releases) have `agentsignals.exe`: one file, no
+installer, run it from any folder. It is not code-signed, so Windows SmartScreen asks once: **More
+info**, then **Run anyway**. Prefer to build it yourself? Read on.
+
+## Build and run
 
 1. Check the tools:
    ```powershell
