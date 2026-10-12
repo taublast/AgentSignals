@@ -79,29 +79,6 @@ impl Rule {
             && self.on == event.kind
             && (event.kind != "finished" || event.busy_ms as f64 >= self.min_busy_s * 1000.0)
     }
-
-    /// One line for the UI.
-    pub fn describe(&self) -> String {
-        let a = &self.action;
-        let mut what = Vec::new();
-        if let Some(s) = &a.sound {
-            what.push(format!("sound {s}"));
-        }
-        if let Some(s) = &a.say {
-            what.push(format!("say \"{s}\""));
-        }
-        if let Some(s) = &a.toast {
-            what.push(format!("toast \"{s}\""));
-        }
-        if a.flash {
-            what.push("flash".into());
-        }
-        if a.raise {
-            what.push("raise".into());
-        }
-        let once = if self.once { " (once)" } else { "" };
-        format!("{} {}: {}{once}", self.session, self.on, what.join(", "))
-    }
 }
 
 /// A status change of a session.

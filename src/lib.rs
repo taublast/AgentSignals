@@ -13,7 +13,6 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 use worker::Cmd;
 
-const HEADER: i32 = 56;
 const TICK_MS: f32 = 1000.0;
 const MENU_WIDTH: f32 = 240.0;
 
@@ -38,10 +37,8 @@ struct App {
     home: String,
     /// What the rows were built from: rebuilt only when it changes.
     session_key: Vec<(u32, String)>,
-    rule_key: Vec<(u32, String)>,
     root: Handle<SkiaLayout>,
     session_stack: Handle<SkiaLayout>,
-    rule_stack: Handle<SkiaLayout>,
     /// The right-click menu of a session, while open.
     menu: Option<Menu>,
     /// The button of the last press on a session row: only the left one focuses its tab.
@@ -65,47 +62,41 @@ impl App {
 
 fn build(app: &mut App) -> Build<SkiaLayout> {
     SkiaLayer::new().fill().assign(&mut app.root).children((
-        // Header: switches, counts. The title is on the window frame.
-        SkiaLayer::new().padding((16, 12, 16, 0)).children((
-            SkiaLabel::new("")
-                .font_size(13)
-                .text_color(hex(0x9CA3AF))
-                .horizontal_options(LayoutOptions::End)
-                .vertical_options(LayoutOptions::Center)
-                .observe(|me, app: &App| {
+        SkiaGrid::new().fill().column_definitions("*").row_definitions("Auto, *").row_spacing(0).children((
+            // Header: wraps to more lines in a narrow window. The title is on the window frame.
+            SkiaWrap::new().fill_x().padding((16, 12, 16, 8)).spacing(12).row(0).children((
+                SkiaRow::new().spacing(8).children((
+                    SkiaSwitch::new()
+                        .accessibility_label("Mute all signals")
+                        .vertical_options(LayoutOptions::Center)
+                        .observe(|me, app: &App| me.set_is_toggled(app.muted))
+                        .on_toggled(|_me, app: &mut App, _cx, on| {
+                            let mut st = app.shared.lock().unwrap();
+                            st.muted = on;
+                            st.version += 1;
+                        }),
+                    label("Mute", 14).vertical_options(LayoutOptions::Center),
+                )),
+                SkiaRow::new().spacing(8).children((
+                    SkiaSwitch::new()
+                        .accessibility_label("Keep window on top")
+                        .vertical_options(LayoutOptions::Center)
+                        .on_toggled(|_me, app: &mut App, _cx, on| {
+                            let _ = app.tx.send(Cmd::Topmost(on));
+                        }),
+                    label("On top", 14).vertical_options(LayoutOptions::Center),
+                )),
+                label("", 13).text_color(hex(0x9CA3AF)).vertical_options(LayoutOptions::Center).observe(|me, app: &App| {
                     let count = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
                     me.set_text(format!("{} waiting · {} busy · {} idle", count("waiting"), count("busy"), count("idle")));
                 }),
-            SkiaRow::new().spacing(8).children((
-                SkiaSwitch::new()
-                    .accessibility_label("Mute all signals")
-                    .vertical_options(LayoutOptions::Center)
-                    .observe(|me, app: &App| me.set_is_toggled(app.muted))
-                    .on_toggled(|_me, app: &mut App, _cx, on| {
-                        let mut st = app.shared.lock().unwrap();
-                        st.muted = on;
-                        st.version += 1;
-                    }),
-                label("Mute", 14).margin((0, 0, 16, 0)).vertical_options(LayoutOptions::Center),
-                SkiaSwitch::new()
-                    .accessibility_label("Keep window on top")
-                    .vertical_options(LayoutOptions::Center)
-                    .on_toggled(|_me, app: &mut App, _cx, on| {
-                        let _ = app.tx.send(Cmd::Topmost(on));
-                    }),
-                label("On top", 14).vertical_options(LayoutOptions::Center),
             )),
+            SkiaScroll::new().fill().row(1).content(SkiaStack::new().padding((12, 0, 12, 16)).spacing(8).children((
+                SkiaStack::new().spacing(6).assign(&mut app.session_stack),
+                section("Recent"),
+                label("", 12).text_color(hex(0x9CA3AF)).observe(|me, app: &App| me.set_text(recent(app))),
+            ))),
         )),
-        SkiaScroll::new().fill().margin((0, HEADER, 0, 0)).content(SkiaStack::new().padding((12, 0, 12, 16)).spacing(8).children((
-            SkiaStack::new().spacing(6).assign(&mut app.session_stack),
-            section("Rules"),
-            SkiaStack::new().spacing(4).assign(&mut app.rule_stack),
-            label("", 12).text_color(hex(0x6B7280)).observe(|me, app: &App| {
-                me.set_text(if app.rules.is_empty() { "No rules yet: an agent adds them with POST /rules." } else { "" })
-            }),
-            section("Recent"),
-            label("", 12).text_color(hex(0x9CA3AF)).observe(|me, app: &App| me.set_text(recent(app))),
-        ))),
         menu_overlay(),
     ))
 }
@@ -291,18 +282,6 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
         ))
 }
 
-fn rule_row(id: u32, text: String) -> Build<SkiaLayout> {
-    SkiaLayer::new().children((
-        label(&text, 13).margin((0, 0, 90, 0)).vertical_options(LayoutOptions::Center),
-        SkiaButton::new("Remove")
-            .font_size(12)
-            .horizontal_options(LayoutOptions::End)
-            .on_tapped(move |_me, app: &mut App, _cx| {
-                app.shared.lock().unwrap().remove_rule(id);
-            }),
-    ))
-}
-
 fn recent(app: &App) -> String {
     if app.events.is_empty() {
         return "Nothing yet.".into();
@@ -348,14 +327,6 @@ fn sync(app: &mut App, cx: &mut Cx) {
             }
             app.session_key = key;
         }
-        let key: Vec<(u32, String)> = app.rules.iter().map(|r| (r.id, r.describe())).collect();
-        if key != app.rule_key {
-            cx.clear_children(app.rule_stack);
-            for (id, text) in &key {
-                cx.add_child(app.rule_stack, rule_row(*id, text.clone()));
-            }
-            app.rule_key = key;
-        }
     }
 }
 
@@ -393,10 +364,8 @@ pub fn run() {
             muted: false,
             home: std::env::var("USERPROFILE").unwrap_or_default(),
             session_key: Vec::new(),
-            rule_key: Vec::new(),
             root: Handle::default(),
             session_stack: Handle::default(),
-            rule_stack: Handle::default(),
             menu: None,
             button: MouseButton::Left,
             size: Size::default(),

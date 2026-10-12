@@ -8,7 +8,7 @@ HTTP API ("every time api-server finishes, play a sound").
 - **Sessions** come from Claude Code's own registry, `%USERPROFILE%\.claude\sessions\<pid>.json`
   (name, `busy` / `idle` / `waiting`). No hooks, nothing to configure in Claude Code.
 - **Events**: `started`, `finished` (busy to idle), `waiting` (needs input, dialog open), `closed`.
-- **Rules** fire signals on events; they persist in `%APPDATA%\AgentSignals\rules.json`.
+- **Rules** (set by agents through the API, or the menu's announce toggle) fire signals on events; they persist in `%APPDATA%\AgentSignals\rules.json`.
 - **Semaphore**: red = waiting for you (a question, a permission dialog), yellow = working, dark green = idle.
   Order: waiting, working, then idle with the session that finished last on top.
 - **Row emoji**: ⚙️ working, ✋ needs you, none when idle; after the name 🔊 speech, 🔔 sound, 💬 toast rules.
