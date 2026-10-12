@@ -6,11 +6,13 @@ puts all of them in one small window and tells you when something happens, so yo
 through tabs to find out.
 
 - **See every session at a glance**: red is waiting for you, yellow is working, green is free.
-- **Hear and see it happen**: a spoken "api-server finished", a sound, a Windows notification, a
-  flashing taskbar button.
+- **Hear when one finishes**: right-click a session and choose **Announce when finished**; the app
+  says "api-server finished" every time it does.
 - **Jump to it**: click a session to bring its terminal tab to the front.
-- **Just ask your agent**: "say it out loud when build-bot finishes", "tell me when any agent needs
-  me". Agents set the app up through its local API.
+
+Optional: agents can drive the app through its local API for more, such as a sound, a Windows
+notification or a status line under a session (see [Set up with Claude](#set-up-with-claude) and
+[API](#api)).
 
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
 A small Windows app written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
@@ -104,7 +106,9 @@ It installs the skill by copying `skill/agent-signals` to `%USERPROFILE%\.claude
 and writing the clone's folder in place of `<app-folder>` in its `SKILL.md`. From then on any agent
 knows the app: "say it out loud when api-server finishes", "tell me when any agent needs me".
 
-## API (`http://127.0.0.1:47801`, `GET /` prints this)
+## API
+
+`http://127.0.0.1:47801`; `GET /` prints this list.
 
 | Call | Body | |
 |---|---|---|
