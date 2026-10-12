@@ -91,7 +91,15 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                     me.set_text(format!("{} waiting · {} busy · {} idle", count("waiting"), count("busy"), count("idle")));
                 }),
             )),
-            SkiaScroll::new().fill().row(1).content(SkiaStack::new().padding((12, 0, 12, 16)).spacing(8).children((
+            SkiaScroll::new()
+                .fill()
+                .row(1)
+                // A vertical bar that stays visible, in the 12 pt right padding of the rows.
+                .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
+                .scroll_bar_thumb_color(hex(0x4B5563))
+                .scroll_bar_track_color(Color::new(0x14FFFFFF))
+                .keep_scroll_bars_visible(true)
+                .content(SkiaStack::new().padding((12, 0, 12, 16)).spacing(8).children((
                 SkiaStack::new().spacing(6).assign(&mut app.session_stack),
                 section("Recent"),
                 label("", 12).text_color(hex(0x9CA3AF)).observe(|me, app: &App| me.set_text(recent(app))),
@@ -273,7 +281,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                     me.set_text_color(if s.status == "idle" { hex(0x6B7280) } else { status_color(&s.status) });
                     // Idle needs no icon: the green dot says it.
                     let icon = match s.status.as_str() {
-                        "busy" => "⚙️ ",
+                        "busy" => "⚙ ", // no U+FE0F: without text shaping it only adds an empty advance
                         "waiting" => "✋ ",
                         _ => "",
                     };
