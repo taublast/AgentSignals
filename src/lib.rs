@@ -15,6 +15,8 @@ use worker::Cmd;
 
 const TICK_MS: f32 = 1000.0;
 const MENU_WIDTH: f32 = 260.0;
+/// The window title; `win::own_window` finds the window by it.
+pub(crate) const TITLE: &str = "Agent Signals";
 
 fn hex(rgb: u32) -> Color {
     Color::new(0xFF00_0000 | rgb)
@@ -367,7 +369,7 @@ pub fn run() {
     let tx = worker::start(shared.clone());
     http::start(listener, shared.clone(), tx.clone());
     let _ = STARTED.set((shared, tx));
-    drawnui::run_sized("Agent Signals", 460.0, 820.0, || {
+    drawnui::run_sized(TITLE, 460.0, 820.0, || {
         let (shared, tx) = STARTED.get().unwrap().clone();
         let app = App {
             shared,

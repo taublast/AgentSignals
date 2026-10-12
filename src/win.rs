@@ -14,7 +14,7 @@ use windows::Win32::UI::Accessibility::{
     UIA_InvokePatternId, UIA_SelectionItemPatternId, UIA_TabItemControlTypeId,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, FLASHW_ALL, FLASHW_TIMERNOFG, FLASHWINFO, FlashWindowEx, GW_OWNER, GetClassNameW, GetWindow,
+    EnumWindows, FLASHW_ALL, FLASHW_TIMERNOFG, FLASHWINFO, FlashWindowEx, GetClassNameW, GetWindowTextW,
     GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE,
     SWP_NOSIZE, SetForegroundWindow, SetWindowPos, ShowWindow,
 };
@@ -151,14 +151,20 @@ fn windows_of_class(class: &str) -> Vec<HWND> {
 }
 
 /// This app's main window (the engine does not hand it out).
+/// Found by its title: winit also keeps a visible, unowned helper window ("Winit Thread Event
+/// Target") in the process, which "the first visible window" could pick instead.
 pub fn own_window() -> Option<HWND> {
     let mut found: Option<HWND> = None;
     unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let found = unsafe { &mut *(lparam.0 as *mut Option<HWND>) };
         let mut pid = 0u32;
         unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-        let owned = unsafe { GetWindow(hwnd, GW_OWNER) }.is_ok_and(|o| !o.is_invalid());
-        if pid == unsafe { GetCurrentProcessId() } && unsafe { IsWindowVisible(hwnd) }.as_bool() && !owned {
+        if pid != unsafe { GetCurrentProcessId() } {
+            return true.into();
+        }
+        let mut buf = [0u16; 64];
+        let n = unsafe { GetWindowTextW(hwnd, &mut buf) } as usize;
+        if String::from_utf16_lossy(&buf[..n]) == crate::TITLE {
             *found = Some(hwnd);
             return false.into();
         }
