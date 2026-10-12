@@ -373,7 +373,7 @@ pub fn run() {
     let tx = worker::start(shared.clone());
     http::start(listener, shared.clone(), tx.clone());
     let _ = STARTED.set((shared, tx));
-    drawnui::run_sized(TITLE, 460.0, 820.0, || {
+    drawnui::run_sized(TITLE, 380.0, 820.0, || {
         let (shared, tx) = STARTED.get().unwrap().clone();
         let app = App {
             shared,
