@@ -18,14 +18,51 @@ HTTP API ("every time api-server finishes, play a sound").
   (Claude ends there; `claude --resume` brings the conversation back). Escape closes the menu.
 - **Mute** silences everything; **On top** keeps the window above others.
 
-## Run
+Windows 10 or 11. Selecting and closing terminal tabs needs Windows Terminal; the list and the
+signals work with any terminal.
+
+## Build and run
+
+There is no prebuilt exe: you build it from this source.
+
+1. Check the tools:
+   ```powershell
+   rustc --version     # 1.85 or newer (built with 1.94)
+   ```
+   Missing? Install Rust and the Microsoft C++ build tools it links with:
+   ```powershell
+   winget install Rustlang.Rustup
+   winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+   ```
+2. Build and start it from the repository folder:
+   ```powershell
+   cargo build --release
+   Start-Process .\target\release\agentsignals.exe
+   ```
+   The first build takes a few minutes: it downloads Skia prebuilt for the drawnui crate. Later
+   builds take seconds. Starting it a second time flashes the running one instead.
+
+### Start with Windows (optional)
+
+From the repository folder:
+
+```powershell
+$lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Agent Signals.lnk")
+$lnk.TargetPath = "$PWD\target\release\agentsignals.exe"; $lnk.WorkingDirectory = "$PWD\target\release"; $lnk.Save()
+```
+
+## Set up with Claude
+
+Your Claude Code agent can do all of it. Tell it:
 
 ```
-cargo run --release
+Set up Agent Signals from https://github.com/taublast/AgentSignals: clone it, follow the README's
+Build and run section, start the app, then install skill/agent-signals as my personal skill.
 ```
 
-The exe is `target\release\agentsignals.exe` (assets copied next to it). Starting it a second
-time flashes the running one instead.
+It installs the skill by copying `skill/agent-signals` to `%USERPROFILE%\.claude\skills\agent-signals`
+and writing the clone's folder in place of `<app-folder>` in its `SKILL.md`. From then on any agent
+knows the app: "say it out loud when api-server finishes", "tell me when any agent needs me".
 
 ## API (`http://127.0.0.1:47801`, `GET /` prints this)
 
@@ -59,3 +96,16 @@ Localhost only, no authentication: any local process can make it beep.
 - A toast needs the per-user AUMID `AgentSignals`, registered on start under
   `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
 - Windows may refuse to bring a window forward from the background; the taskbar button flashes instead.
+
+## What it reads and writes
+
+- Reads `%USERPROFILE%\.claude\sessions\*.json` (Claude Code's list of live sessions) and, for a
+  session without a name of its own, the title lines at the end of its transcript.
+- Writes `%APPDATA%\AgentSignals\rules.json` and, after a crash, `crash.log`; registers the toast
+  AUMID under `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
+- Sends nothing anywhere: the API listens on 127.0.0.1 only.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Open Sans (`assets/OpenSans-Regular.ttf`) is under the Apache License 2.0,
+see [assets/OpenSans-LICENSE.txt](assets/OpenSans-LICENSE.txt).
