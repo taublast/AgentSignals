@@ -14,6 +14,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use worker::Cmd;
 
 const TICK_MS: f32 = 1000.0;
+/// Blue of the switches when on.
+const ACCENT: u32 = 0x3B82F6;
 const MENU_WIDTH: f32 = 260.0;
 /// The window title; `win::own_window` finds the window by it.
 pub(crate) const TITLE: &str = "Agent Signals";
@@ -69,6 +71,7 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
             SkiaWrap::new().fill_x().padding((16, 12, 16, 8)).spacing(12).row(0).children((
                 SkiaRow::new().spacing(8).children((
                     SkiaSwitch::new()
+                        .color_frame_on(hex(ACCENT))
                         .accessibility_label("Mute all signals")
                         .vertical_options(LayoutOptions::Center)
                         .observe(|me, app: &App| me.set_is_toggled(app.muted))
@@ -81,6 +84,7 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                 )),
                 SkiaRow::new().spacing(8).children((
                     SkiaSwitch::new()
+                        .color_frame_on(hex(ACCENT))
                         .accessibility_label("Keep window on top")
                         .vertical_options(LayoutOptions::Center)
                         .on_toggled(|_me, app: &mut App, _cx, on| {
