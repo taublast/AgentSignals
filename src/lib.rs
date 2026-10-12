@@ -7,14 +7,14 @@ mod win;
 mod worker;
 
 use drawnui::prelude::*;
-use state::{Event, Rule, Session, Shared, State};
+use state::{Event, Rule, Session, Shared, Signal, State};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 use worker::Cmd;
 
 const TICK_MS: f32 = 1000.0;
-const MENU_WIDTH: f32 = 240.0;
+const MENU_WIDTH: f32 = 260.0;
 
 fn hex(rgb: u32) -> Color {
     Color::new(0xFF00_0000 | rgb)
@@ -129,7 +129,7 @@ fn menu_overlay() -> Build<SkiaLayout> {
                 if let Some(m) = &app.menu {
                     // Kept inside the window.
                     let x = m.x.min(app.size.width - MENU_WIDTH - 8.0).max(8.0);
-                    let y = m.y.min(app.size.height - 140.0).max(8.0);
+                    let y = m.y.min(app.size.height - 250.0).max(8.0);
                     me.set_margin(Thickness::new(x, y, 0.0, 0.0));
                 }
             })
@@ -140,25 +140,10 @@ fn menu_overlay() -> Build<SkiaLayout> {
                             cx.set_clipboard(m.name);
                         }
                     }),
-                    SkiaShape::new()
-                        .corner_radius(6)
-                        .fill_x()
-                        .padding((12, 9, 12, 9))
-                        .accessibility_role(Aria::MENU_ITEM)
-                        .accessibility_label("Announce when finished")
-                        .animation_tapped(SkiaTouchAnimation::Ripple)
-                        .on_tapped(|_me, app: &mut App, cx| {
-                            if let Some(m) = app.menu.take() {
-                                let on = !state::announcing(&app.rules, &m.name);
-                                app.shared.lock().unwrap().set_announce(&m.name, on);
-                                sync(app, cx);
-                            }
-                        })
-                        .children((label("", 14).observe(|me, app: &App| {
-                            if let Some(m) = &app.menu {
-                                me.set_text(if state::announcing(&app.rules, &m.name) { "🔇 Stop announcing" } else { "🔊 Announce when finished" });
-                            }
-                        }),)),
+                    signal_item(Signal::Say),
+                    signal_item(Signal::Sound),
+                    signal_item(Signal::Toast),
+                    signal_item(Signal::Flash),
                     menu_item("Close session", |app, _cx| {
                         if let Some(m) = &mut app.menu {
                             m.confirm = true;
@@ -185,6 +170,31 @@ fn menu_overlay() -> Build<SkiaLayout> {
                         )),
                     )),
             )))
+}
+
+/// A menu toggle: this signal when the session finishes, on or off.
+fn signal_item(signal: Signal) -> Build<SkiaShape> {
+    let (_, _, name) = signal.labels();
+    SkiaShape::new()
+        .corner_radius(6)
+        .fill_x()
+        .padding((12, 9, 12, 9))
+        .accessibility_role(Aria::MENU_ITEM)
+        .accessibility_label(name)
+        .animation_tapped(SkiaTouchAnimation::Ripple)
+        .on_tapped(move |_me, app: &mut App, cx| {
+            if let Some(m) = app.menu.take() {
+                let on = !state::finished_signal(&app.rules, &m.name, signal);
+                app.shared.lock().unwrap().set_finished_signal(&m.name, signal, on);
+                sync(app, cx);
+            }
+        })
+        .children((label("", 14).observe(move |me, app: &App| {
+            if let Some(m) = &app.menu {
+                let (turn_on, turn_off, _) = signal.labels();
+                me.set_text(if state::finished_signal(&app.rules, &m.name, signal) { turn_off } else { turn_on });
+            }
+        }),))
 }
 
 fn menu_item(text: &str, action: fn(&mut App, &mut Cx)) -> Build<SkiaShape> {

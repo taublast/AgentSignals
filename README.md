@@ -6,25 +6,21 @@ puts all of them in one small window and tells you when something happens, so yo
 through tabs to find out.
 
 - **See every session at a glance**: red is waiting for you, yellow is working, green is free.
-- **Hear when one finishes**: right-click a session and choose **Announce when finished**; the app
-  says "api-server finished" every time it does.
+- **Know when one finishes**: right-click a session and turn on what you want: a spoken
+  "api-server finished", a sound, a Windows notification, a flashing taskbar button.
 - **Jump to it**: click a session to bring its terminal tab to the front.
-
-Optional: agents can drive the app through its local API for more, such as a sound, a Windows
-notification or a status line under a session (see [Set up with Claude](#set-up-with-claude) and
-[API](#api)).
 
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
 A small Windows app written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
 
-<img src="docs/screenshot.png" alt="Agent Signals: sessions waiting (red), working (yellow) and idle (green), with their rule icons and recent events" width="420">
+<img src="docs/screenshot.png" alt="Agent Signals: sessions waiting (red), working (yellow) and idle (green), with their signal icons and recent events" width="420">
 
 ## The window
 
 **Top bar**
 
-- **Mute**: silences every signal (sounds, speech, notifications, flashes) until you switch it off,
-  for example during a call. Status changes are still listed under Recent.
+- **Mute**: silences every signal until you switch it off, for example during a call. Status
+  changes are still listed under Recent.
 - **On top**: keeps the window above all other windows, so it stays visible while you work in the
   terminals.
 - **Counts**: how many sessions are waiting for you, working, and idle.
@@ -32,33 +28,54 @@ A small Windows app written in Rust, its UI drawn with [DrawnUi.Rust](https://gi
 **One row per Claude Code session**, in this order: waiting for you first, then working, then idle
 with the one that finished last on top.
 
-- **The dot**: red = it asks you something (a question, a permission dialog), yellow = it is
-  working, dark green = it is idle.
-- **The name** of the session, then icons for what you get when it changes: 🔊 it speaks,
-  🔔 it plays a sound, 💬 it shows a Windows notification.
-- **The line under the name**: what it waits for ("input needed"), or a status an agent posted
-  there ("running 42 of 120 tests"), or its project folder.
-- **On the right**: ✋ waiting or ⚙ working, and for how long. Idle sessions show only the time
-  since they finished.
 - **Click** a row: its Windows Terminal tab comes to the front.
 - **Right-click** a row (or the Menu key):
   - **Copy name**: the session's name, to paste into a message to it or to another agent.
-  - **🔊 Announce when finished**: the app says "<name> finished" each time it finishes. Choose it
-    again (🔇 Stop announcing) to turn it off.
-  - **Close session**: closes its terminal tab after you confirm. Claude ends there; `claude --resume`
-    brings the conversation back.
+  - **🔊 Announce when finished**: the app says "<name> finished" every time it finishes.
+  - **🔔 Play a sound when finished**: a short sound (Windows' tada).
+  - **💬 Notify when finished**: a Windows notification "<name> finished".
+  - **⚡ Flash taskbar when finished**: the app's taskbar button flashes until you open the app.
+  - **Close session**: closes its terminal tab after you confirm. Claude ends there;
+    `claude --resume` brings the conversation back.
 
-**Recent**: the last status changes ("frontend finished after 17m") and what was signaled.
+  Each signal item turns into "Stop ..." once it is on; choose it again to turn it off.
+
+**Recent**: the last status changes ("frontend finished after 17m") and which signals they gave.
 
 The list scrolls when it is longer than the window; the bar on the right shows where you are.
+
+### What the colors and icons mean
+
+| On a row | Meaning |
+|---|---|
+| 🔴 red dot | The session waits for you: a question, a permission dialog. |
+| 🟡 yellow dot | The session is working. |
+| 🟢 dark green dot | The session is idle: it finished and has nothing to do. |
+| ✋ 1m | Waiting for you, for 1 minute so far. |
+| ⚙ 4m | Working, for 4 minutes so far. |
+| 18m (no icon) | Idle, finished 18 minutes ago. |
+| 🔊 after the name | You will hear "<name> finished". |
+| 🔔 after the name | You will hear a sound when it finishes. |
+| 💬 after the name | You will get a Windows notification when it finishes. |
+| ⚡ after the name | The taskbar button will flash when it finishes. |
+| Line under the name | What it waits for ("input needed"), a status line an agent posted there (see API), or its project folder. |
+
+| In the menu | Meaning |
+|---|---|
+| 🔇 Stop announcing | Announcing is on for this session; choose it to turn it off. |
+| 🔕 Stop the sound | The sound is on; choose it to turn it off. |
+| 💬 Stop notifying | Notifications are on; choose it to turn them off. |
+| ⚡ Stop flashing | Flashing is on; choose it to turn it off. |
 
 ## Under the hood
 
 - **Sessions** come from Claude Code's own registry, `%USERPROFILE%\.claude\sessions\<pid>.json`
   (name, `busy` / `idle` / `waiting`). No hooks, nothing to configure in Claude Code.
 - **Events**: `started`, `finished` (busy to idle), `waiting` (needs input, dialog open), `closed`.
-- **Rules** say which event of which session gives which signal. Agents set them through the API
-  below, the menu's announce item sets one too; they persist in `%APPDATA%\AgentSignals\rules.json`.
+- **Rules** say which event of which session gives which signal. The menu's signal items make them;
+  they persist in `%APPDATA%\AgentSignals\rules.json`.
+- **Optional, for agents**: a local API (below) lets Claude agents add rules (also for `waiting`,
+  `started`, `closed`), signal right away, or post a status line under a session.
 
 Windows 10 or 11. Selecting and closing terminal tabs needs Windows Terminal; the list and the
 signals work with any terminal.
@@ -95,7 +112,7 @@ $lnk.TargetPath = "$PWD\target\release\agentsignals.exe"; $lnk.WorkingDirectory 
 
 ## Set up with Claude
 
-Your Claude Code agent can do all of it. Tell it:
+Your Claude Code agent can build and start the app for you. Tell it:
 
 ```
 Set up Agent Signals from https://github.com/taublast/AgentSignals: clone it, follow the README's
@@ -103,12 +120,12 @@ Build and run section, start the app, then install skill/agent-signals as my per
 ```
 
 It installs the skill by copying `skill/agent-signals` to `%USERPROFILE%\.claude\skills\agent-signals`
-and writing the clone's folder in place of `<app-folder>` in its `SKILL.md`. From then on any agent
-knows the app: "say it out loud when api-server finishes", "tell me when any agent needs me".
+and writing the clone's folder in place of `<app-folder>` in its `SKILL.md`. The skill is optional:
+it lets agents use the API, for example to add a rule when you ask "tell me when any agent needs me".
 
 ## API
 
-`http://127.0.0.1:47801`; `GET /` prints this list.
+Optional, for Claude agents and scripts: `http://127.0.0.1:47801`; `GET /` prints this list.
 
 | Call | Body | |
 |---|---|---|
@@ -139,7 +156,8 @@ Localhost only, no authentication: any local process can make it beep.
   reads that title from the transcript tail to find the tab.
 - A toast needs the per-user AUMID `AgentSignals`, registered on start under
   `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
-- Windows may refuse to bring a window forward from the background; the taskbar button flashes instead.
+- API `raise`: Windows may refuse to bring a window forward from the background; the taskbar button
+  flashes instead.
 
 ## What it reads and writes
 

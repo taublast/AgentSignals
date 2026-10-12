@@ -148,18 +148,9 @@ impl State {
         self.version += 1;
     }
 
-    /// Turns the "<name> finished" announcement on or off: on adds a rule; off takes the speech
-    /// out of the session's own `finished` rules and drops the ones left with nothing to do.
-    pub fn set_announce(&mut self, name: &str, on: bool) {
-        if on {
-            let say = Action { say: Some("{name} finished".into()), ..Action::default() };
-            self.add_rule(Rule { id: 0, session: name.into(), on: "finished".into(), action: say, once: false, min_busy_s: 0.0 });
-            return;
-        }
-        for r in self.rules.iter_mut().filter(|r| r.session.eq_ignore_ascii_case(name) && r.on == "finished") {
-            r.action.say = None;
-        }
-        self.rules.retain(|r| !r.action.is_empty());
+    /// The menu's toggles: one signal for when the session finishes, on or off.
+    pub fn set_finished_signal(&mut self, name: &str, signal: Signal, on: bool) {
+        toggle_finished_signal(&mut self.rules, name, signal, on);
         self.save_rules();
     }
 
@@ -210,7 +201,75 @@ pub fn diff(old: &HashMap<u32, Session>, new: &HashMap<u32, Session>, now: u64) 
     events
 }
 
-/// What the rules do for a session, shown after its name: 🔊 speech, 🔔 sound, 💬 toast.
+/// A signal the session menu turns on or off for when a session finishes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Signal {
+    Say,
+    Sound,
+    Toast,
+    Flash,
+}
+
+impl Signal {
+    fn get(self, a: &Action) -> bool {
+        match self {
+            Signal::Say => a.say.is_some(),
+            Signal::Sound => a.sound.is_some(),
+            Signal::Toast => a.toast.is_some(),
+            Signal::Flash => a.flash,
+        }
+    }
+
+    fn set(self, a: &mut Action, on: bool) {
+        match self {
+            Signal::Say => a.say = on.then(|| "{name} finished".into()),
+            Signal::Sound => a.sound = on.then(|| "tada".into()),
+            Signal::Toast => a.toast = on.then(|| "{name} finished".into()),
+            Signal::Flash => a.flash = on,
+        }
+    }
+
+    /// Menu text to turn it on, to turn it off, and its name for screen readers.
+    pub fn labels(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            Signal::Say => ("🔊 Announce when finished", "🔇 Stop announcing", "Announce when finished"),
+            Signal::Sound => ("🔔 Play a sound when finished", "🔕 Stop the sound", "Play a sound when finished"),
+            Signal::Toast => ("💬 Notify when finished", "💬 Stop notifying", "Notify when finished"),
+            Signal::Flash => ("⚡ Flash taskbar when finished", "⚡ Stop flashing", "Flash taskbar when finished"),
+        }
+    }
+}
+
+fn own_finished(r: &Rule, name: &str) -> bool {
+    r.session.eq_ignore_ascii_case(name) && r.on == "finished"
+}
+
+/// One of the session's own rules gives this signal when it finishes.
+pub fn finished_signal(rules: &[Rule], name: &str, signal: Signal) -> bool {
+    rules.iter().any(|r| own_finished(r, name) && signal.get(&r.action))
+}
+
+/// On: adds the signal to the session's own `finished` rule, or makes one. Off: takes it out of
+/// every such rule and drops the rules left with nothing to do.
+pub fn toggle_finished_signal(rules: &mut Vec<Rule>, name: &str, signal: Signal, on: bool) {
+    if on {
+        if let Some(r) = rules.iter_mut().find(|r| own_finished(r, name) && !r.once) {
+            signal.set(&mut r.action, true);
+            return;
+        }
+        let mut action = Action::default();
+        signal.set(&mut action, true);
+        let id = rules.iter().map(|r| r.id).max().unwrap_or(0) + 1;
+        rules.push(Rule { id, session: name.into(), on: "finished".into(), action, once: false, min_busy_s: 0.0 });
+        return;
+    }
+    for r in rules.iter_mut().filter(|r| own_finished(r, name)) {
+        signal.set(&mut r.action, false);
+    }
+    rules.retain(|r| !r.action.is_empty());
+}
+
+/// What the rules do for a session, shown after its name: 🔊 speech, 🔔 sound, 💬 toast, ⚡ flash.
 pub fn rule_icons(rules: &[Rule], name: &str) -> String {
     let mine: Vec<&Rule> = rules.iter().filter(|r| r.session == "*" || r.session.eq_ignore_ascii_case(name)).collect();
     let mut icons = String::new();
@@ -218,17 +277,13 @@ pub fn rule_icons(rules: &[Rule], name: &str) -> String {
         (mine.iter().any(|r| r.action.say.is_some()), "🔊"),
         (mine.iter().any(|r| r.action.sound.is_some()), "🔔"),
         (mine.iter().any(|r| r.action.toast.is_some()), "💬"),
+        (mine.iter().any(|r| r.action.flash), "⚡"),
     ] {
         if has {
             icons.push_str(icon);
         }
     }
     icons
-}
-
-/// A rule of the session's own speaks when it finishes (the menu's announce toggle).
-pub fn announcing(rules: &[Rule], name: &str) -> bool {
-    rules.iter().any(|r| r.session.eq_ignore_ascii_case(name) && r.on == "finished" && r.action.say.is_some())
 }
 
 /// The board's order: waiting, busy, then idle with the one that went idle last on top; by name
@@ -317,7 +372,21 @@ mod tests {
         let rules = vec![rule("api-server", "finished", say), rule("*", "waiting", sound)];
         assert_eq!(rule_icons(&rules, "API-Server"), "🔊🔔");
         assert_eq!(rule_icons(&rules, "build-bot"), "🔔");
-        assert!(announcing(&rules, "api-server"));
-        assert!(!announcing(&rules, "build-bot"));
+        assert!(finished_signal(&rules, "api-server", Signal::Say));
+        assert!(!finished_signal(&rules, "build-bot", Signal::Say));
+    }
+
+    #[test]
+    fn menu_toggles() {
+        let mut rules = Vec::new();
+        toggle_finished_signal(&mut rules, "api-server", Signal::Say, true);
+        toggle_finished_signal(&mut rules, "api-server", Signal::Flash, true);
+        assert_eq!(rules.len(), 1, "both signals in one rule");
+        assert_eq!(rule_icons(&rules, "api-server"), "🔊⚡");
+        toggle_finished_signal(&mut rules, "api-server", Signal::Say, false);
+        assert!(!finished_signal(&rules, "api-server", Signal::Say));
+        assert!(finished_signal(&rules, "api-server", Signal::Flash));
+        toggle_finished_signal(&mut rules, "api-server", Signal::Flash, false);
+        assert!(rules.is_empty(), "a rule left with nothing to do goes");
     }
 }
