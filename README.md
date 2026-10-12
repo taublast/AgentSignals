@@ -7,7 +7,7 @@ through tabs to find out.
 
 - **See every session at a glance**: red is waiting for you, yellow is working, green is free.
 - **Know when one finishes**: right-click a session and turn on what you want: a spoken
-  "api-server finished", a sound, a Windows notification, a flashing taskbar button.
+  "api-server finished", a sound, a Windows notification, its terminal flashing on the taskbar.
 - **Jump to it**: click a session to bring its terminal tab to the front.
 
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
@@ -34,7 +34,9 @@ with the one that finished last on top.
   - **🔊 Announce when finished**: the app says "<name> finished" every time it finishes.
   - **🔔 Play a sound when finished**: a short sound (Windows' tada).
   - **💬 Notify when finished**: a Windows notification "<name> finished".
-  - **⚡ Flash taskbar when finished**: the app's taskbar button flashes until you open the app.
+  - **⚡ Flash taskbar when finished**: the session's terminal window flashes on the taskbar until
+    you switch to it. Taskbar buttons are usually grouped, so the Windows Terminal button flashes:
+    hover it to see which window. Outside Windows Terminal, Agent Signals' own button flashes.
   - **Close session**: closes its terminal tab after you confirm. Claude ends there;
     `claude --resume` brings the conversation back.
 
@@ -57,7 +59,7 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 | 🔊 after the name | You will hear "<name> finished". |
 | 🔔 after the name | You will hear a sound when it finishes. |
 | 💬 after the name | You will get a Windows notification when it finishes. |
-| ⚡ after the name | The taskbar button will flash when it finishes. |
+| ⚡ after the name | Its terminal window will flash on the taskbar when it finishes. |
 | Line under the name | What it waits for ("input needed"), a status line an agent posted there (see API), or its project folder. |
 
 | In the menu | Meaning |
@@ -139,7 +141,9 @@ Optional, for Claude agents and scripts: `http://127.0.0.1:47801`; `GET /` print
 | `GET /events` | | last 50 events and what fired |
 | `GET /sounds` | | playable .wav names |
 
-Text fields take `{name}` and `{waiting}`. Sounds: a name from `GET /sounds` (`%APPDATA%\AgentSignals\sounds`,
+`flash` flashes the session's terminal window (Agent Signals itself when there is no session or
+the session is not in Windows Terminal); `raise` brings Agent Signals forward. Text fields take
+`{name}` and `{waiting}`. Sounds: a name from `GET /sounds` (`%APPDATA%\AgentSignals\sounds`,
 then `C:\Windows\Media`) or a full `.wav` path. Sounds and speech share one queue, so signals never overlap.
 
 ```powershell

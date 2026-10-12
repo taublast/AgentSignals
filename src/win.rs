@@ -100,6 +100,11 @@ impl Signals {
         Ok(false)
     }
 
+    /// The Windows Terminal window holding the tab titled `name`.
+    pub fn terminal_window(&self, name: &str) -> Option<HWND> {
+        self.find_tab(name).ok().flatten().map(|(hwnd, _)| hwnd)
+    }
+
     /// The Windows Terminal tab whose title, minus its status marker, is `name`, and its window.
     fn find_tab(&self, name: &str) -> Result<Option<(HWND, IUIAutomationElement)>> {
         let uia = self.uia.as_ref().ok_or_else(|| windows::core::Error::new(windows::core::HRESULT(-1), "no UI Automation"))?;

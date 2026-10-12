@@ -72,10 +72,11 @@ fn run(shared: Shared, rx: Receiver<Cmd>) {
         st.version += 1;
         for mut event in events {
             let waiting = live.get(&event.pid).map_or(String::new(), |s| s.waiting_for.clone());
+            let tab = live.get(&event.pid).map_or(String::new(), tab_title);
             let rules: Vec<_> = st.rules.iter().filter(|r| r.matches(&event.session, &event)).cloned().collect();
             let mut fired = Vec::new();
             for rule in &rules {
-                fired.push(if st.muted { "muted".into() } else { execute(&signals, &rule.action, &event.session, &waiting) });
+                fired.push(if st.muted { "muted".into() } else { execute(&signals, &rule.action, &event.session, &waiting, &tab) });
                 if rule.once {
                     st.remove_rule(rule.id);
                 }
@@ -90,7 +91,8 @@ fn command(signals: &Signals, shared: &Shared, cmd: Cmd) {
     match cmd {
         Cmd::Signal(action, name) => {
             let muted = shared.lock().unwrap().muted;
-            let fired = if muted { "muted".into() } else { execute(signals, &action, &name, "") };
+            let tab = shared.lock().unwrap().sessions.iter().find(|s| s.name.eq_ignore_ascii_case(&name)).map_or(String::new(), tab_title);
+            let fired = if muted { "muted".into() } else { execute(signals, &action, &name, "", &tab) };
             shared.lock().unwrap().log(Event {
                 at_ms: state::now_ms(),
                 pid: 0,
@@ -125,7 +127,13 @@ fn tab_command(signals: &Signals, shared: &Shared, name: String, kind: &str, run
 }
 
 /// Runs an action; returns what it did, errors included.
-fn execute(signals: &Signals, a: &Action, name: &str, waiting: &str) -> String {
+/// The title of a session's terminal tab: its custom or AI title when it has no name of its own.
+fn tab_title(s: &Session) -> String {
+    if s.title.is_empty() { s.name.clone() } else { s.title.clone() }
+}
+
+/// Runs an action for a session whose terminal tab is titled `tab` ("" for none).
+fn execute(signals: &Signals, a: &Action, name: &str, waiting: &str, tab: &str) -> String {
     let mut done = Vec::new();
     let mut report = |what: &str, r: windows::core::Result<()>| match r {
         Ok(()) => done.push(what.to_string()),
@@ -146,15 +154,27 @@ fn execute(signals: &Signals, a: &Action, name: &str, waiting: &str) -> String {
         });
         report("toast", signals.toast(&title, &state::expand(text, name, waiting)));
     }
-    if a.flash || a.raise {
-        if let Some(hwnd) = win::own_window() {
-            if a.raise {
-                win::raise(hwnd);
-            } else {
+    if a.flash {
+        // The agent's terminal window; Agent Signals itself when there is none (no session, or a
+        // terminal other than Windows Terminal).
+        match (!tab.is_empty()).then(|| signals.terminal_window(tab)).flatten() {
+            Some(hwnd) => {
                 win::flash(hwnd);
+                done.push("flash terminal".into());
+            }
+            None => {
+                if let Some(hwnd) = win::own_window() {
+                    win::flash(hwnd);
+                }
+                done.push("flash app".into());
             }
         }
-        done.push(if a.raise { "raise" } else { "flash" }.into());
+    }
+    if a.raise {
+        if let Some(hwnd) = win::own_window() {
+            win::raise(hwnd);
+        }
+        done.push("raise".into());
     }
     done.join(", ")
 }
