@@ -106,6 +106,8 @@ info**, then **Run anyway**. Prefer to build it yourself? Read on.
    ```
    The first build takes a few minutes: it downloads Skia prebuilt for the drawnui crate. Later
    builds take seconds. Starting it a second time flashes the running one instead.
+3. For a release file: `dev\release.ps1` builds `target\dist\release\agentsignals.exe` with local
+   folder paths remapped out of the binary, and fails if any is left.
 
 ### Start with Windows (optional)
 
