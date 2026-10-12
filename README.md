@@ -5,6 +5,8 @@ shows every Claude Code session running on this machine and signals when somethi
 sound, a spoken line, a Windows toast, a taskbar flash. Claude agents set it up through a local
 HTTP API ("every time api-server finishes, play a sound").
 
+<img src="docs/screenshot.png" alt="Agent Signals: sessions waiting (red), working (yellow) and idle (green), with their rule icons and recent events" width="420">
+
 - **Sessions** come from Claude Code's own registry, `%USERPROFILE%\.claude\sessions\<pid>.json`
   (name, `busy` / `idle` / `waiting`). No hooks, nothing to configure in Claude Code.
 - **Events**: `started`, `finished` (busy to idle), `waiting` (needs input, dialog open), `closed`.
