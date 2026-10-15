@@ -30,6 +30,10 @@ pub struct Saved {
 struct File {
     #[serde(default)]
     auto_reopen: bool,
+    /// Sessions started in the home folder reopen in this folder instead: Claude Code asks to
+    /// trust the home folder every time, a folder trusted once stays trusted. Empty: as started.
+    #[serde(default)]
+    reopen_home_in: String,
     #[serde(default)]
     sessions: Vec<Saved>,
 }
@@ -41,6 +45,7 @@ const FORGET_AFTER: Duration = Duration::from_secs(30);
 pub struct Memory {
     pub saved: Vec<Saved>,
     pub auto_reopen: bool,
+    pub reopen_home_in: String,
     /// Ids seen running since the app started.
     seen: HashSet<String>,
     /// Ids that stopped running, and when.
@@ -54,11 +59,11 @@ fn path() -> PathBuf {
 impl Memory {
     pub fn load() -> Memory {
         let file: File = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Memory { saved: file.sessions, auto_reopen: file.auto_reopen, seen: HashSet::new(), gone: HashMap::new() }
+        Memory { saved: file.sessions, auto_reopen: file.auto_reopen, reopen_home_in: file.reopen_home_in, seen: HashSet::new(), gone: HashMap::new() }
     }
 
     pub fn save(&self) {
-        let file = File { auto_reopen: self.auto_reopen, sessions: self.saved.clone() };
+        let file = File { auto_reopen: self.auto_reopen, reopen_home_in: self.reopen_home_in.clone(), sessions: self.saved.clone() };
         let _ = std::fs::create_dir_all(state::data_dir());
         if let Err(e) = std::fs::write(path(), serde_json::to_vec_pretty(&file).unwrap()) {
             eprintln!("saving {}: {e}", path().display());
@@ -144,6 +149,15 @@ fn launch_info(id: &str) -> Option<(String, String)> {
     Some((cwd, mode))
 }
 
+/// The folder a session reopens in: `home_in` for one started in the home folder, when set.
+fn start_folder(cwd: &str, home: &str, home_in: &str) -> String {
+    if !home_in.is_empty() && cwd.trim_end_matches('\\').eq_ignore_ascii_case(home.trim_end_matches('\\')) {
+        home_in.to_string()
+    } else {
+        cwd.to_string()
+    }
+}
+
 /// The Windows Terminal command line that reopens one session.
 pub fn command_line(s: &Saved, window: &str) -> Vec<String> {
     let mut args: Vec<String> = ["-w", window, "nt", "-d", &s.cwd, "claude", "--resume", &s.id].iter().map(|a| a.to_string()).collect();
@@ -156,9 +170,14 @@ pub fn command_line(s: &Saved, window: &str) -> Vec<String> {
     args
 }
 
-/// Reopens the sessions in their windows and tab order, a few seconds apart, on a thread of its own.
-pub fn reopen(mut list: Vec<Saved>) {
+/// Reopens the sessions in their windows and tab order, a few seconds apart, on a thread of its own;
+/// sessions started in the home folder in `home_in` when it is set.
+pub fn reopen(mut list: Vec<Saved>, home_in: &str) {
     list.sort_by_key(|s| (s.window, s.tab));
+    let home = std::env::var("USERPROFILE").unwrap_or_default();
+    for s in &mut list {
+        s.cwd = start_folder(&s.cwd, &home, home_in);
+    }
     std::thread::spawn(move || {
         // Windows get fresh numbers in the order they come, sessions without a known window go last.
         let mut numbers: Vec<u32> = Vec::new();
@@ -185,6 +204,14 @@ pub fn reopen(mut list: Vec<Saved>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_sessions_reopen_elsewhere() {
+        assert_eq!(start_folder(r"C:\Users\me", r"C:\Users\me", r"C:\Users\me\Agents"), r"C:\Users\me\Agents");
+        assert_eq!(start_folder(r"c:\users\ME\", r"C:\Users\me", r"C:\Users\me\Agents"), r"C:\Users\me\Agents");
+        assert_eq!(start_folder(r"C:\Work\repo", r"C:\Users\me", r"C:\Users\me\Agents"), r"C:\Work\repo");
+        assert_eq!(start_folder(r"C:\Users\me", r"C:\Users\me", ""), r"C:\Users\me");
+    }
 
     #[test]
     fn reopen_command() {

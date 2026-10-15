@@ -120,7 +120,7 @@ fn remember(
             let mut st = shared.lock().unwrap();
             if memory.auto_reopen {
                 log_reopen(&mut st, closed.len());
-                restore::reopen(closed);
+                restore::reopen(closed, &memory.reopen_home_in);
             } else {
                 st.reopen = closed;
                 st.version += 1;
@@ -154,7 +154,7 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, cmd: Cmd) {
             let mut st = shared.lock().unwrap();
             let list = std::mem::take(&mut st.reopen);
             log_reopen(&mut st, list.len());
-            restore::reopen(list);
+            restore::reopen(list, &memory.reopen_home_in);
         }
         Cmd::Dismiss => {
             let mut st = shared.lock().unwrap();

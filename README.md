@@ -33,8 +33,23 @@ A small Windows app written in Rust, its UI drawn with [DrawnUi.Rust](https://gi
 **Reopen 20 sessions from last time** reopens each one with `claude --resume`: its conversation,
 its start folder, its permission mode and its name, in Windows Terminal, grouped into windows and
 tabs as they were, a few seconds apart. **Not now** forgets them. A reopened session waits for you;
-it does not continue interrupted work by itself. Claude Code never saves trust for the home folder,
-so a session started there asks "trust this folder?" once each time it opens.
+it does not continue interrupted work by itself.
+
+### Sessions started in your home folder
+
+Claude Code never saves trust for the home folder, so a session started there asks "trust this
+folder?" every time it opens, also when it is reopened. Start agents in a folder of their own
+instead, for example `%USERPROFILE%\Agents`; it asks once and stays trusted. To keep the memory
+your agents built in the home folder, give that folder a `.claude\settings.local.json` with
+
+```json
+{ "autoMemoryDirectory": "~/.claude/projects/C--Users-<you>/memory" }
+```
+
+(the memory folder of your home folder; Claude Code reads this setting only from local or user
+settings). Conversations started in the home folder resume from the new folder without trouble.
+To have Agent Signals reopen them there too, set `"reopen_home_in": "C:\\Users\\<you>\\Agents"` in
+`%APPDATA%\AgentSignals\sessions.json` while the app is closed.
 
 **One row per Claude Code session**, in this order: waiting for you first, then working, then idle
 with the one that finished last on top.
