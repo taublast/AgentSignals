@@ -105,6 +105,30 @@ impl Signals {
         self.find_tab(name).ok().flatten().map(|(hwnd, _)| hwnd)
     }
 
+    /// Every Windows Terminal tab: (window number, tab position, title). Tabs of one window share
+    /// the number; numbers follow the windows' order on screen at this moment.
+    pub fn tab_layout(&self) -> Vec<(u32, u32, String)> {
+        let mut out = Vec::new();
+        let Some(uia) = self.uia.as_ref() else { return out };
+        unsafe {
+            let Ok(any) = uia.CreateTrueCondition() else { return out };
+            for (window, hwnd) in windows_of_class(TERMINAL_CLASS).into_iter().enumerate() {
+                let Ok(all) = uia.ElementFromHandle(hwnd).and_then(|e| e.FindAll(TreeScope_Descendants, &any)) else { continue };
+                let mut tab = 0;
+                for i in 0..all.Length().unwrap_or(0) {
+                    let Ok(el) = all.GetElement(i) else { continue };
+                    if el.CurrentControlType().ok() == Some(UIA_TabItemControlTypeId) {
+                        if let Ok(title) = el.CurrentName() {
+                            out.push((window as u32, tab, title.to_string()));
+                        }
+                        tab += 1;
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// The Windows Terminal tab whose title, minus its status marker, is `name`, and its window.
     fn find_tab(&self, name: &str) -> Result<Option<(HWND, IUIAutomationElement)>> {
         let uia = self.uia.as_ref().ok_or_else(|| windows::core::Error::new(windows::core::HRESULT(-1), "no UI Automation"))?;

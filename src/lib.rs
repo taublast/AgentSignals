@@ -2,6 +2,7 @@
 //! (sound, voice, toast, flash) that agents set up through a local HTTP API.
 
 mod http;
+mod restore;
 mod state;
 mod win;
 mod worker;
@@ -37,6 +38,9 @@ struct App {
     events: Vec<Event>,
     notes: HashMap<String, String>,
     muted: bool,
+    /// Labels of the sessions a reboot closed, offered for reopening.
+    reopen: Vec<String>,
+    auto_reopen: bool,
     /// The user folder: a session started there shows no folder line.
     home: String,
     /// What the rows were built from: rebuilt only when it changes.
@@ -92,6 +96,19 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                         }),
                     label("On top", 14).vertical_options(LayoutOptions::Center),
                 )),
+                SkiaRow::new().spacing(8).children((
+                    SkiaSwitch::new()
+                        .color_frame_on(hex(ACCENT))
+                        .accessibility_label("Reopen closed sessions when the app starts")
+                        .vertical_options(LayoutOptions::Center)
+                        .observe(|me, app: &App| me.set_is_toggled(app.auto_reopen))
+                        .on_toggled(|_me, app: &mut App, _cx, on| {
+                            if on != app.auto_reopen {
+                                let _ = app.tx.send(Cmd::AutoReopen(on));
+                            }
+                        }),
+                    label("Reopen at start", 14).vertical_options(LayoutOptions::Center),
+                )),
                 label("", 13).text_color(hex(0x9CA3AF)).vertical_options(LayoutOptions::Center).observe(|me, app: &App| {
                     let count = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
                     me.set_text(format!("{} waiting · {} busy · {} idle", count("waiting"), count("busy"), count("idle")));
@@ -106,6 +123,7 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                 .scroll_bar_track_color(Color::new(0x14FFFFFF))
                 .keep_scroll_bars_visible(true)
                 .content(SkiaStack::new().padding((12, 0, 12, 16)).spacing(8).children((
+                reopen_banner(),
                 SkiaStack::new().spacing(6).assign(&mut app.session_stack),
                 section("Recent"),
                 label("", 12).text_color(hex(0x9CA3AF)).observe(|me, app: &App| me.set_text(recent(app))),
@@ -113,6 +131,41 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
         )),
         menu_overlay(),
     ))
+}
+
+/// After a reboot: the sessions open last time, with a button that reopens them all.
+fn reopen_banner() -> Build<SkiaShape> {
+    SkiaShape::new()
+        .corner_radius(10)
+        .background_color(hex(0x1E2A44))
+        .stroke_color(hex(ACCENT))
+        .stroke_width(1.55)
+        .padding((12, 10, 12, 12))
+        .fill_x()
+        .observe(|me, app: &App| me.set_is_visible(!app.reopen.is_empty()))
+        .children(SkiaStack::new().spacing(8).children((
+            label("", 14).text_color(Color::WHITE).observe(|me, app: &App| {
+                let n = app.reopen.len();
+                me.set_text(format!("{n} session{} from last time {} closed", if n == 1 { "" } else { "s" }, if n == 1 { "is" } else { "are" }));
+            }),
+            label("", 12).text_color(hex(0x9CA3AF)).max_lines(4).observe(|me, app: &App| me.set_text(app.reopen.join(", "))),
+            SkiaRow::new().spacing(8).children((
+                SkiaButton::new("")
+                    .font_size(13)
+                    .accessibility_label("Reopen sessions from last time")
+                    .background_color(hex(ACCENT))
+                    .observe(|me, app: &App| {
+                        let n = app.reopen.len();
+                        me.set_text(format!("Reopen {n} session{} from last time", if n == 1 { "" } else { "s" }));
+                    })
+                    .on_tapped(|_me, app: &mut App, _cx| {
+                        let _ = app.tx.send(Cmd::Reopen);
+                    }),
+                SkiaButton::new("Not now").font_size(13).accessibility_label("Not now").background_color(hex(0x3B4256)).on_tapped(|_me, app: &mut App, _cx| {
+                    let _ = app.tx.send(Cmd::Dismiss);
+                }),
+            )),
+        )))
 }
 
 /// The session menu over a dimmed window; a tap outside it closes it.
@@ -342,6 +395,8 @@ fn sync(app: &mut App, cx: &mut Cx) {
         app.events = st.events.iter().take(15).cloned().collect();
         app.notes = st.notes.clone();
         app.muted = st.muted;
+        app.reopen = st.reopen.iter().map(|s| s.label.clone()).collect();
+        app.auto_reopen = st.auto_reopen;
         drop(st);
         let key: Vec<(u32, String)> = app.sessions.iter().map(|s| (s.pid, s.name.clone())).collect();
         if key != app.session_key {
@@ -386,6 +441,8 @@ pub fn run() {
             events: Vec::new(),
             notes: HashMap::new(),
             muted: false,
+            reopen: Vec::new(),
+            auto_reopen: false,
             home: std::env::var("USERPROFILE").unwrap_or_default(),
             session_key: Vec::new(),
             root: Handle::default(),

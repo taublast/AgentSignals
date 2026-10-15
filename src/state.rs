@@ -11,7 +11,14 @@ pub type Shared = std::sync::Arc<std::sync::Mutex<State>>;
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Session {
     pub pid: u32,
+    /// Claude Code's session (conversation) id: `claude --resume <id>` reopens it.
+    pub id: String,
     pub name: String,
+    /// The user named it (`-n`, `/rename`); otherwise Claude Code made the name up.
+    pub named: bool,
+    /// A session in a terminal (kind `interactive`, entrypoint `cli`); one-shot `-p` runs, SDK
+    /// runs and background workers are never reopened.
+    pub interactive: bool,
     /// What its terminal tab shows when it has no name of its own (custom or AI title).
     pub title: String,
     /// `busy`, `idle` or `waiting`.
@@ -107,6 +114,10 @@ pub struct State {
     /// Lower-case session name to the line an agent shows under it.
     pub notes: HashMap<String, String>,
     pub muted: bool,
+    /// Sessions open last time and closed now (a reboot): the window offers to reopen them.
+    pub reopen: Vec<crate::restore::Saved>,
+    /// Reopen them by itself when the app starts.
+    pub auto_reopen: bool,
 }
 
 impl State {
@@ -321,7 +332,7 @@ mod tests {
     use super::*;
 
     fn s(pid: u32, status: &str, since_ms: u64) -> Session {
-        Session { pid, name: format!("s{pid}"), title: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms }
+        Session { pid, id: String::new(), name: format!("s{pid}"), named: true, interactive: true, title: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms }
     }
 
     fn map(list: &[Session]) -> HashMap<u32, Session> {

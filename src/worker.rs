@@ -2,6 +2,7 @@
 //! fires the rules and runs every signal. It never waits on the UI, so signals work while the
 //! window is minimized.
 
+use crate::restore::{self, Memory};
 use crate::state::{self, Action, Event, Session, Shared};
 use crate::win::{self, Signals};
 use serde_json::Value;
@@ -17,7 +18,16 @@ pub enum Cmd {
     /// Close the session's Windows Terminal tab (confirmed in the UI).
     CloseTab(String),
     Topmost(bool),
+    /// Reopen the sessions a reboot closed (`State::reopen`).
+    Reopen,
+    /// Forget them instead.
+    Dismiss,
+    /// Reopen them by itself at the next start.
+    AutoReopen(bool),
 }
+
+/// The tab layout is read again at least this often, to follow tabs moved by hand.
+const LAYOUT_EVERY: Duration = Duration::from_secs(300);
 
 const POLL: Duration = Duration::from_millis(500);
 
@@ -39,10 +49,15 @@ fn run(shared: Shared, rx: Receiver<Cmd>) {
     let mut live: HashMap<u32, Session> = HashMap::new();
     let mut first = true;
     let mut next_poll = Instant::now();
+    let mut memory = Memory::load();
+    shared.lock().unwrap().auto_reopen = memory.auto_reopen;
+    // The session ids the layout was last read for, and when.
+    let mut layout_ids: Vec<String> = Vec::new();
+    let mut layout_at = Instant::now();
     loop {
         match rx.recv_timeout(next_poll.saturating_duration_since(Instant::now())) {
             Ok(cmd) => {
-                command(&signals, &shared, cmd);
+                command(&signals, &shared, &mut memory, cmd);
                 continue;
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -59,9 +74,10 @@ fn run(shared: Shared, rx: Receiver<Cmd>) {
         }
         // Sessions already open when the app starts are not "started".
         let events = if first { Vec::new() } else { state::diff(&live, &new, now) };
-        first = false;
         let changed = new != live;
         live = new;
+        remember(&signals, &shared, &mut memory, &live, first, &mut layout_ids, &mut layout_at);
+        first = false;
         if !changed && events.is_empty() {
             continue;
         }
@@ -87,8 +103,72 @@ fn run(shared: Shared, rx: Receiver<Cmd>) {
     }
 }
 
-fn command(signals: &Signals, shared: &Shared, cmd: Cmd) {
+/// Keeps the remembered sessions up to date; at start, offers (or reopens) what a reboot closed.
+fn remember(
+    signals: &Signals,
+    shared: &Shared,
+    memory: &mut Memory,
+    live: &HashMap<u32, Session>,
+    first: bool,
+    layout_ids: &mut Vec<String>,
+    layout_at: &mut Instant,
+) {
+    let list: Vec<Session> = live.values().cloned().collect();
+    if first {
+        let closed = memory.closed(&list);
+        if !closed.is_empty() {
+            let mut st = shared.lock().unwrap();
+            if memory.auto_reopen {
+                log_reopen(&mut st, closed.len());
+                restore::reopen(closed);
+            } else {
+                st.reopen = closed;
+                st.version += 1;
+            }
+        }
+    }
+    let mut ids: Vec<String> = list.iter().map(|s| s.id.clone()).collect();
+    ids.sort();
+    if first || ids != *layout_ids || layout_at.elapsed() >= LAYOUT_EVERY {
+        memory.update(&list, &signals.tab_layout());
+        *layout_ids = ids;
+        *layout_at = Instant::now();
+    }
+    memory.forget_expired();
+    // Offered sessions that got opened some other way leave the offer.
+    let mut st = shared.lock().unwrap();
+    let before = st.reopen.len();
+    st.reopen.retain(|r| !list.iter().any(|s| s.id == r.id));
+    if st.reopen.len() != before {
+        st.version += 1;
+    }
+}
+
+fn log_reopen(st: &mut state::State, count: usize) {
+    st.log(Event { at_ms: state::now_ms(), pid: 0, session: format!("{count} sessions"), kind: "reopened".into(), busy_ms: 0, fired: String::new() });
+}
+
+fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, cmd: Cmd) {
     match cmd {
+        Cmd::Reopen => {
+            let mut st = shared.lock().unwrap();
+            let list = std::mem::take(&mut st.reopen);
+            log_reopen(&mut st, list.len());
+            restore::reopen(list);
+        }
+        Cmd::Dismiss => {
+            let mut st = shared.lock().unwrap();
+            let ids: Vec<String> = std::mem::take(&mut st.reopen).into_iter().map(|s| s.id).collect();
+            st.version += 1;
+            memory.forget(&ids);
+        }
+        Cmd::AutoReopen(on) => {
+            memory.auto_reopen = on;
+            memory.save();
+            let mut st = shared.lock().unwrap();
+            st.auto_reopen = on;
+            st.version += 1;
+        }
         Cmd::Signal(action, name) => {
             let muted = shared.lock().unwrap().muted;
             let tab = shared.lock().unwrap().sessions.iter().find(|s| s.name.eq_ignore_ascii_case(&name)).map_or(String::new(), tab_title);
@@ -247,7 +327,12 @@ fn parse(v: &Value) -> Option<Session> {
     let title = if text("nameSource") == "user" { String::new() } else { transcript_title(&cwd, &text("sessionId")) };
     Some(Session {
         pid,
+        id: text("sessionId"),
         name,
+        named: text("nameSource") == "user",
+        // A terminal session is kind `interactive` with entrypoint `cli`; a one-shot `-p` run is
+        // also `interactive`, but with entrypoint `sdk-cli`.
+        interactive: matches!(text("kind").as_str(), "interactive" | "") && matches!(text("entrypoint").as_str(), "cli" | ""),
         title,
         // Claude Code's statuses: busy, shell (running a shell command, which its own UI shows as
         // working), idle, waiting.

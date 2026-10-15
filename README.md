@@ -9,6 +9,8 @@ through tabs to find out.
 - **Know when one finishes**: right-click a session and turn on what you want: a spoken
   "api-server finished", a sound, a Windows notification, its terminal flashing on the taskbar.
 - **Jump to it**: click a session to bring its terminal tab to the front.
+- **Get them back after a reboot**: one click reopens every session that was open, with its
+  conversation, in its Windows Terminal window and tab order.
 
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
 A small Windows app written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
@@ -23,7 +25,16 @@ A small Windows app written in Rust, its UI drawn with [DrawnUi.Rust](https://gi
   changes are still listed under Recent.
 - **On top**: keeps the window above all other windows, so it stays visible while you work in the
   terminals.
+- **Reopen at start**: after a reboot, reopens the sessions from last time by itself, without the
+  button below.
 - **Counts**: how many sessions are waiting for you, working, and idle.
+
+**After a reboot** the list starts with "20 sessions from last time are closed" and their names.
+**Reopen 20 sessions from last time** reopens each one with `claude --resume`: its conversation,
+its start folder, its permission mode and its name, in Windows Terminal, grouped into windows and
+tabs as they were, a few seconds apart. **Not now** forgets them. A reopened session waits for you;
+it does not continue interrupted work by itself. Claude Code never saves trust for the home folder,
+so a session started there asks "trust this folder?" once each time it opens.
 
 **One row per Claude Code session**, in this order: waiting for you first, then working, then idle
 with the one that finished last on top.
@@ -111,7 +122,8 @@ info**, then **Run anyway**. Prefer to build it yourself? Read on.
 
 ### Start with Windows (optional)
 
-From the repository folder:
+With **Reopen at start** on, this brings your sessions back after every reboot. From the
+repository folder:
 
 ```powershell
 $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Agent Signals.lnk")
@@ -171,10 +183,14 @@ Localhost only, no authentication: any local process can make it beep.
 
 ## What it reads and writes
 
-- Reads `%USERPROFILE%\.claude\sessions\*.json` (Claude Code's list of live sessions) and, for a
-  session without a name of its own, the title lines at the end of its transcript.
-- Writes `%APPDATA%\AgentSignals\rules.json` and, after a crash, `crash.log`; registers the toast
-  AUMID under `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
+- Reads `%USERPROFILE%\.claude\sessions\*.json` (Claude Code's list of live sessions) and, from
+  each session's transcript, its first lines (start folder), its last lines (permission mode) and,
+  for a session without a name of its own, its title.
+- Writes `%APPDATA%\AgentSignals\rules.json`, `sessions.json` (the open terminal sessions and the
+  Reopen at start switch; a session that closes is forgotten 30 s later, so a shutdown keeps them
+  all) and, after a crash, `crash.log`; registers the toast AUMID under
+  `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
+- Starts `wt` (Windows Terminal) only when you reopen sessions.
 - Sends nothing anywhere: the API listens on 127.0.0.1 only.
 
 ## License
