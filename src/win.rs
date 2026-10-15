@@ -1,8 +1,10 @@
 //! Windows side: voice and sounds (SAPI), toasts, taskbar flash, window raise / topmost,
 //! Windows Terminal tab focus (UI Automation), process liveness.
 
+use std::cell::RefCell;
 use std::path::Path;
 use windows::Data::Xml::Dom::XmlDocument;
+use windows::Foundation::TypedEventHandler;
 use windows::UI::Notifications::{ToastNotification, ToastNotificationManager, ToastNotifier};
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
 use windows::Win32::Media::Speech::{ISpVoice, SPF_ASYNC, SPF_IS_FILENAME, SPF_IS_NOT_XML, SpVoice};
@@ -27,6 +29,7 @@ const TERMINAL_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
 pub struct Signals {
     voice: Option<ISpVoice>,
     notifier: Option<ToastNotifier>,
+    toasts: RefCell<Vec<ToastNotification>>,
     uia: Option<IUIAutomation>,
 }
 
@@ -46,7 +49,7 @@ impl Signals {
             let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))
                 .inspect_err(|e| eprintln!("toast notifier: {e}"))
                 .ok();
-            Signals { voice, notifier, uia }
+            Signals { voice, notifier, toasts: RefCell::new(Vec::new()), uia }
         }
     }
 
@@ -61,7 +64,8 @@ impl Signals {
         unsafe { voice.Speak(&HSTRING::from(text), (SPF_ASYNC.0 | SPF_IS_NOT_XML.0) as u32, None) }
     }
 
-    pub fn toast(&self, title: &str, text: &str) -> Result<()> {
+    /// Shows a toast; `on_click` runs (on a thread pool thread) when the user clicks it.
+    pub fn toast(&self, title: &str, text: &str, on_click: Option<Box<dyn Fn() + Send>>) -> Result<()> {
         let notifier = self.notifier.as_ref().ok_or_else(|| windows::core::Error::new(windows::core::HRESULT(-1), "no toast notifier"))?;
         let xml = format!(
             "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",
@@ -70,7 +74,23 @@ impl Signals {
         );
         let doc = XmlDocument::new()?;
         doc.LoadXml(&HSTRING::from(xml))?;
-        notifier.Show(&ToastNotification::CreateToastNotification(&doc)?)
+        let toast = ToastNotification::CreateToastNotification(&doc)?;
+        if let Some(on_click) = on_click {
+            toast.Activated(&TypedEventHandler::new(move |_, _| {
+                on_click();
+                Ok(())
+            }))?;
+        }
+        notifier.Show(&toast)?;
+        // A click reaches the handler only while the toast object lives, in the popup and in the
+        // notification center alike.
+        // ponytail: the last 50 toasts stay clickable; older ones in the notification center do nothing.
+        let mut shown = self.toasts.borrow_mut();
+        if shown.len() == 50 {
+            shown.remove(0);
+        }
+        shown.push(toast);
+        Ok(())
     }
 
     /// Selects the Windows Terminal tab titled after the session and brings its window to the

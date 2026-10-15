@@ -25,8 +25,6 @@ A small Windows app written in Rust, its UI drawn with [DrawnUi.Rust](https://gi
   changes are still listed under Recent.
 - **On top**: keeps the window above all other windows, so it stays visible while you work in the
   terminals.
-- **Reopen at start**: after a reboot, reopens the sessions from last time by itself, without the
-  button below.
 - **Counts**: how many sessions are waiting for you, working, and idle.
 
 **After a reboot** the list starts with "20 sessions from last time are closed" and their names.
@@ -59,7 +57,8 @@ with the one that finished last on top.
   - **Copy name**: the session's name, to paste into a message to it or to another agent.
   - **🔊 Announce when finished**: the app says "<name> finished" every time it finishes.
   - **🔔 Play a sound when finished**: a short sound (Windows' tada).
-  - **💬 Notify when finished**: a Windows notification "<name> finished".
+  - **💬 Notify when finished**: a Windows notification "<name> finished". Click it and the
+    session's terminal tab comes to the front, as with a click on its row.
   - **⚡ Flash taskbar when finished**: the session's terminal window flashes on the taskbar until
     you switch to it. Taskbar buttons are usually grouped, so the Windows Terminal button flashes:
     hover it to see which window. Outside Windows Terminal, Agent Signals' own button flashes.
@@ -137,8 +136,8 @@ info**, then **Run anyway**. Prefer to build it yourself? Read on.
 
 ### Start with Windows (optional)
 
-With **Reopen at start** on, this brings your sessions back after every reboot. From the
-repository folder:
+The app then starts when you sign in, so after a reboot it offers your sessions from last time
+right away. From the repository folder:
 
 ```powershell
 $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Agent Signals.lnk")
@@ -201,9 +200,8 @@ Localhost only, no authentication: any local process can make it beep.
 - Reads `%USERPROFILE%\.claude\sessions\*.json` (Claude Code's list of live sessions) and, from
   each session's transcript, its first lines (start folder), its last lines (permission mode) and,
   for a session without a name of its own, its title.
-- Writes `%APPDATA%\AgentSignals\rules.json`, `sessions.json` (the open terminal sessions and the
-  Reopen at start switch; a session that closes is forgotten 30 s later, so a shutdown keeps them
-  all) and, after a crash, `crash.log`; registers the toast AUMID under
+- Writes `%APPDATA%\AgentSignals\rules.json`, `sessions.json` (the open terminal sessions; a
+  session that closes is forgotten 30 s later, so a shutdown keeps them all) and, after a crash, `crash.log`; registers the toast AUMID under
   `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
 - Starts `wt` (Windows Terminal) only when you reopen sessions.
 - Sends nothing anywhere: the API listens on 127.0.0.1 only.

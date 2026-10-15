@@ -116,8 +116,6 @@ pub struct State {
     pub muted: bool,
     /// Sessions open last time and closed now (a reboot): the window offers to reopen them.
     pub reopen: Vec<crate::restore::Saved>,
-    /// Reopen them by itself when the app starts.
-    pub auto_reopen: bool,
 }
 
 impl State {

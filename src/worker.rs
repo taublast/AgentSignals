@@ -22,8 +22,6 @@ pub enum Cmd {
     Reopen,
     /// Forget them instead.
     Dismiss,
-    /// Reopen them by itself at the next start.
-    AutoReopen(bool),
 }
 
 /// The tab layout is read again at least this often, to follow tabs moved by hand.
@@ -33,7 +31,7 @@ const POLL: Duration = Duration::from_millis(500);
 
 pub fn start(shared: Shared) -> Sender<Cmd> {
     let (tx, rx) = channel();
-    std::thread::Builder::new().name("signals".into()).spawn(move || run(shared, rx)).unwrap();
+    std::thread::Builder::new().name("signals".into()).spawn({ let tx = tx.clone(); move || run(shared, rx, tx) }).unwrap();
     tx
 }
 
@@ -41,7 +39,7 @@ fn sessions_dir() -> PathBuf {
     PathBuf::from(std::env::var("USERPROFILE").unwrap_or_default()).join(".claude").join("sessions")
 }
 
-fn run(shared: Shared, rx: Receiver<Cmd>) {
+fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
     let signals = Signals::new();
     let dir = sessions_dir();
     // File -> (modified, parsed); a file is parsed again only when it changed.
@@ -50,14 +48,13 @@ fn run(shared: Shared, rx: Receiver<Cmd>) {
     let mut first = true;
     let mut next_poll = Instant::now();
     let mut memory = Memory::load();
-    shared.lock().unwrap().auto_reopen = memory.auto_reopen;
     // The session ids the layout was last read for, and when.
     let mut layout_ids: Vec<String> = Vec::new();
     let mut layout_at = Instant::now();
     loop {
         match rx.recv_timeout(next_poll.saturating_duration_since(Instant::now())) {
             Ok(cmd) => {
-                command(&signals, &shared, &mut memory, cmd);
+                command(&signals, &shared, &mut memory, &tx, cmd);
                 continue;
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -92,7 +89,7 @@ fn run(shared: Shared, rx: Receiver<Cmd>) {
             let rules: Vec<_> = st.rules.iter().filter(|r| r.matches(&event.session, &event)).cloned().collect();
             let mut fired = Vec::new();
             for rule in &rules {
-                fired.push(if st.muted { "muted".into() } else { execute(&signals, &rule.action, &event.session, &waiting, &tab) });
+                fired.push(if st.muted { "muted".into() } else { execute(&signals, &tx, &rule.action, &event.session, &waiting, &tab) });
                 if rule.once {
                     st.remove_rule(rule.id);
                 }
@@ -103,7 +100,7 @@ fn run(shared: Shared, rx: Receiver<Cmd>) {
     }
 }
 
-/// Keeps the remembered sessions up to date; at start, offers (or reopens) what a reboot closed.
+/// Keeps the remembered sessions up to date; at start, offers to reopen what a reboot closed.
 fn remember(
     signals: &Signals,
     shared: &Shared,
@@ -118,13 +115,8 @@ fn remember(
         let closed = memory.closed(&list);
         if !closed.is_empty() {
             let mut st = shared.lock().unwrap();
-            if memory.auto_reopen {
-                log_reopen(&mut st, closed.len());
-                restore::reopen(closed, &memory.reopen_home_in);
-            } else {
-                st.reopen = closed;
-                st.version += 1;
-            }
+            st.reopen = closed;
+            st.version += 1;
         }
     }
     let mut ids: Vec<String> = list.iter().map(|s| s.id.clone()).collect();
@@ -148,7 +140,7 @@ fn log_reopen(st: &mut state::State, count: usize) {
     st.log(Event { at_ms: state::now_ms(), pid: 0, session: format!("{count} sessions"), kind: "reopened".into(), busy_ms: 0, fired: String::new() });
 }
 
-fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, cmd: Cmd) {
+fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<Cmd>, cmd: Cmd) {
     match cmd {
         Cmd::Reopen => {
             let mut st = shared.lock().unwrap();
@@ -162,17 +154,10 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, cmd: Cmd) {
             st.version += 1;
             memory.forget(&ids);
         }
-        Cmd::AutoReopen(on) => {
-            memory.auto_reopen = on;
-            memory.save();
-            let mut st = shared.lock().unwrap();
-            st.auto_reopen = on;
-            st.version += 1;
-        }
         Cmd::Signal(action, name) => {
             let muted = shared.lock().unwrap().muted;
             let tab = shared.lock().unwrap().sessions.iter().find(|s| s.name.eq_ignore_ascii_case(&name)).map_or(String::new(), tab_title);
-            let fired = if muted { "muted".into() } else { execute(signals, &action, &name, "", &tab) };
+            let fired = if muted { "muted".into() } else { execute(signals, tx, &action, &name, "", &tab) };
             shared.lock().unwrap().log(Event {
                 at_ms: state::now_ms(),
                 pid: 0,
@@ -213,7 +198,7 @@ fn tab_title(s: &Session) -> String {
 }
 
 /// Runs an action for a session whose terminal tab is titled `tab` ("" for none).
-fn execute(signals: &Signals, a: &Action, name: &str, waiting: &str, tab: &str) -> String {
+fn execute(signals: &Signals, tx: &Sender<Cmd>, a: &Action, name: &str, waiting: &str, tab: &str) -> String {
     let mut done = Vec::new();
     let mut report = |what: &str, r: windows::core::Result<()>| match r {
         Ok(()) => done.push(what.to_string()),
@@ -232,7 +217,14 @@ fn execute(signals: &Signals, a: &Action, name: &str, waiting: &str, tab: &str) 
         let title = a.title.as_deref().map(|t| state::expand(t, name, waiting)).unwrap_or_else(|| {
             if name.is_empty() { "Agent Signals".into() } else { name.into() }
         });
-        report("toast", signals.toast(&title, &state::expand(text, name, waiting)));
+        // A click on the toast focuses the session's terminal tab, as a click on its row does.
+        let on_click: Option<Box<dyn Fn() + Send>> = (!name.is_empty()).then(|| {
+            let (tx, name) = (tx.clone(), name.to_string());
+            Box::new(move || {
+                let _ = tx.send(Cmd::Focus(name.clone()));
+            }) as Box<dyn Fn() + Send>
+        });
+        report("toast", signals.toast(&title, &state::expand(text, name, waiting), on_click));
     }
     if a.flash {
         // The agent's terminal window; Agent Signals itself when there is none (no session, or a

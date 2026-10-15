@@ -40,7 +40,6 @@ struct App {
     muted: bool,
     /// Labels of the sessions a reboot closed, offered for reopening.
     reopen: Vec<String>,
-    auto_reopen: bool,
     /// The user folder: a session started there shows no folder line.
     home: String,
     /// What the rows were built from: rebuilt only when it changes.
@@ -95,19 +94,6 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                             let _ = app.tx.send(Cmd::Topmost(on));
                         }),
                     label("On top", 14).vertical_options(LayoutOptions::Center),
-                )),
-                SkiaRow::new().spacing(8).children((
-                    SkiaSwitch::new()
-                        .color_frame_on(hex(ACCENT))
-                        .accessibility_label("Reopen closed sessions when the app starts")
-                        .vertical_options(LayoutOptions::Center)
-                        .observe(|me, app: &App| me.set_is_toggled(app.auto_reopen))
-                        .on_toggled(|_me, app: &mut App, _cx, on| {
-                            if on != app.auto_reopen {
-                                let _ = app.tx.send(Cmd::AutoReopen(on));
-                            }
-                        }),
-                    label("Reopen at start", 14).vertical_options(LayoutOptions::Center),
                 )),
                 label("", 13).text_color(hex(0x9CA3AF)).vertical_options(LayoutOptions::Center).observe(|me, app: &App| {
                     let count = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
@@ -175,6 +161,12 @@ fn menu_overlay() -> Build<SkiaLayout> {
         .background_color(Color::new(0x5000_0000))
         .observe(|me, app: &App| me.set_is_visible(app.menu.is_some()))
         .on_tapped(|_me, app: &mut App, _cx| app.menu = None)
+        // It covers the window: the mouse leaving it left the window, and the menu closes.
+        .on_hovered(|_me, app: &mut App, _cx, on| {
+            if !on {
+                app.menu = None;
+            }
+        })
         .children(SkiaShape::new()
             .corner_radius(8)
             .background_color(hex(0x262B3B))
@@ -241,6 +233,7 @@ fn signal_item(signal: Signal) -> Build<SkiaShape> {
         .accessibility_role(Aria::MENU_ITEM)
         .accessibility_label(name)
         .animation_tapped(SkiaTouchAnimation::Ripple)
+        .on_hovered(hover_item)
         .on_tapped(move |_me, app: &mut App, cx| {
             if let Some(m) = app.menu.take() {
                 let on = !state::finished_signal(&app.rules, &m.name, signal);
@@ -264,8 +257,14 @@ fn menu_item(text: &str, action: fn(&mut App, &mut Cx)) -> Build<SkiaShape> {
         .accessibility_role(Aria::MENU_ITEM)
         .accessibility_label(text)
         .animation_tapped(SkiaTouchAnimation::Ripple)
+        .on_hovered(hover_item)
         .on_tapped(move |_me, app: &mut App, cx| action(app, cx))
         .children((label(text, 14),))
+}
+
+/// A menu item under the mouse takes the panel's border color.
+fn hover_item(me: &mut Mut<'_, SkiaShape>, _app: &mut App, _cx: &mut Cx, on: bool) {
+    me.set_background_color(if on { hex(0x3B4256) } else { Color::TRANSPARENT });
 }
 
 /// Emoji (status, rule icons, agents' notes) come from the system's emoji font.
@@ -396,7 +395,6 @@ fn sync(app: &mut App, cx: &mut Cx) {
         app.notes = st.notes.clone();
         app.muted = st.muted;
         app.reopen = st.reopen.iter().map(|s| s.label.clone()).collect();
-        app.auto_reopen = st.auto_reopen;
         drop(st);
         let key: Vec<(u32, String)> = app.sessions.iter().map(|s| (s.pid, s.name.clone())).collect();
         if key != app.session_key {
@@ -442,7 +440,6 @@ pub fn run() {
             notes: HashMap::new(),
             muted: false,
             reopen: Vec::new(),
-            auto_reopen: false,
             home: std::env::var("USERPROFILE").unwrap_or_default(),
             session_key: Vec::new(),
             root: Handle::default(),

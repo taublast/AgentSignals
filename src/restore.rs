@@ -28,8 +28,6 @@ pub struct Saved {
 
 #[derive(Default, Serialize, Deserialize)]
 struct File {
-    #[serde(default)]
-    auto_reopen: bool,
     /// Sessions started in the home folder reopen in this folder instead: Claude Code asks to
     /// trust the home folder every time, a folder trusted once stays trusted. Empty: as started.
     #[serde(default)]
@@ -44,7 +42,6 @@ const FORGET_AFTER: Duration = Duration::from_secs(30);
 
 pub struct Memory {
     pub saved: Vec<Saved>,
-    pub auto_reopen: bool,
     pub reopen_home_in: String,
     /// Ids seen running since the app started.
     seen: HashSet<String>,
@@ -59,11 +56,11 @@ fn path() -> PathBuf {
 impl Memory {
     pub fn load() -> Memory {
         let file: File = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Memory { saved: file.sessions, auto_reopen: file.auto_reopen, reopen_home_in: file.reopen_home_in, seen: HashSet::new(), gone: HashMap::new() }
+        Memory { saved: file.sessions, reopen_home_in: file.reopen_home_in, seen: HashSet::new(), gone: HashMap::new() }
     }
 
     pub fn save(&self) {
-        let file = File { auto_reopen: self.auto_reopen, reopen_home_in: self.reopen_home_in.clone(), sessions: self.saved.clone() };
+        let file = File { reopen_home_in: self.reopen_home_in.clone(), sessions: self.saved.clone() };
         let _ = std::fs::create_dir_all(state::data_dir());
         if let Err(e) = std::fs::write(path(), serde_json::to_vec_pretty(&file).unwrap()) {
             eprintln!("saving {}: {e}", path().display());
