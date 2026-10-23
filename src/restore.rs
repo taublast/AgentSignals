@@ -24,6 +24,10 @@ pub struct Saved {
     /// Its Windows Terminal window (tabs of one window share the number) and tab position.
     pub window: u32,
     pub tab: u32,
+    /// Epoch ms it closed while the app was running; 0 = open when the app last saw it, also when
+    /// a reboot closed it.
+    #[serde(default)]
+    pub closed_at: u64,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -36,9 +40,9 @@ struct File {
     sessions: Vec<Saved>,
 }
 
-/// A session that disappears is forgotten only this long after: a shutdown ends the sessions
-/// one by one before it ends the app, so a reboot leaves them all remembered.
-const FORGET_AFTER: Duration = Duration::from_secs(30);
+/// A session that disappears counts as closed only this long after: a shutdown ends the sessions
+/// one by one before it ends the app, so the ones a reboot closed stay marked open.
+const CLOSED_AFTER: Duration = Duration::from_secs(30);
 
 pub struct Memory {
     pub saved: Vec<Saved>,
@@ -47,6 +51,8 @@ pub struct Memory {
     seen: HashSet<String>,
     /// Ids that stopped running, and when.
     gone: HashMap<String, Instant>,
+    /// Ids being reopened, and since when.
+    pub reopening: HashMap<String, Instant>,
 }
 
 fn path() -> PathBuf {
@@ -55,8 +61,11 @@ fn path() -> PathBuf {
 
 impl Memory {
     pub fn load() -> Memory {
-        let file: File = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Memory { saved: file.sessions, reopen_home_in: file.reopen_home_in, seen: HashSet::new(), gone: HashMap::new() }
+        let mut file: File = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        // A session without a conversation (closed before its first message) cannot be resumed;
+        // the running ones come back with the first poll.
+        file.sessions.retain(|s| transcript(&s.id).is_some());
+        Memory { saved: file.sessions, reopen_home_in: file.reopen_home_in, seen: HashSet::new(), gone: HashMap::new(), reopening: HashMap::new() }
     }
 
     pub fn save(&self) {
@@ -67,10 +76,17 @@ impl Memory {
         }
     }
 
-    /// Remembered sessions that are not running and were not running since the app started:
-    /// what a reboot closed.
+    /// Remembered sessions that were open when the app last ran and are not running now: what a
+    /// reboot closed.
     pub fn closed(&self, live: &[Session]) -> Vec<Saved> {
-        self.saved.iter().filter(|s| !self.seen.contains(&s.id) && !live.iter().any(|l| l.id == s.id)).cloned().collect()
+        self.saved.iter().filter(|s| s.closed_at == 0 && !self.seen.contains(&s.id) && !live.iter().any(|l| l.id == s.id)).cloned().collect()
+    }
+
+    /// Every remembered session that is not running, the last closed first.
+    pub fn inactive(&self, live: &[Session]) -> Vec<Saved> {
+        let mut list: Vec<Saved> = self.saved.iter().filter(|s| !live.iter().any(|l| l.id == s.id)).cloned().collect();
+        list.sort_by_cached_key(|s| (std::cmp::Reverse(if s.closed_at == 0 { u64::MAX } else { s.closed_at }), s.label.to_lowercase()));
+        list
     }
 
     /// The running sessions now: new ones are remembered, positions refreshed from `layout`
@@ -85,6 +101,7 @@ impl Memory {
             let label = if s.named { s.name.clone() } else { tab_title.clone() };
             match self.saved.iter_mut().find(|x| x.id == s.id) {
                 Some(x) => {
+                    x.closed_at = 0;
                     x.label = label;
                     x.name = if s.named { s.name.clone() } else { String::new() };
                     if let Some((w, t)) = place {
@@ -95,7 +112,7 @@ impl Memory {
                     let (cwd, mode) = launch_info(&s.id).unwrap_or_else(|| (s.cwd.clone(), String::new()));
                     let (window, tab) = place.unwrap_or((u32::MAX, u32::MAX));
                     let name = if s.named { s.name.clone() } else { String::new() };
-                    self.saved.push(Saved { id: s.id.clone(), name, label, cwd, mode, window, tab });
+                    self.saved.push(Saved { id: s.id.clone(), name, label, cwd, mode, window, tab, closed_at: 0 });
                 }
             }
         }
@@ -107,12 +124,37 @@ impl Memory {
         self.save();
     }
 
-    /// Forgets sessions that stopped `FORGET_AFTER` ago.
-    pub fn forget_expired(&mut self) {
-        let expired: Vec<String> = self.gone.iter().filter(|(_, t)| t.elapsed() >= FORGET_AFTER).map(|(id, _)| id.clone()).collect();
-        if !expired.is_empty() {
-            self.forget(&expired);
+    /// Marks the sessions that stopped `CLOSED_AFTER` ago closed, as of when they stopped.
+    pub fn close_expired(&mut self) {
+        let now = state::now_ms();
+        let expired: Vec<(String, u64)> = self
+            .gone
+            .iter()
+            .filter(|(_, t)| t.elapsed() >= CLOSED_AFTER)
+            .map(|(id, t)| (id.clone(), now.saturating_sub(t.elapsed().as_millis() as u64)))
+            .collect();
+        if expired.is_empty() {
+            return;
         }
+        for (id, at) in expired {
+            self.gone.remove(&id);
+            self.seen.remove(&id);
+            if let Some(s) = self.saved.iter_mut().find(|s| s.id == id) {
+                s.closed_at = at;
+            }
+        }
+        // A session closed before its first message has no conversation to resume.
+        self.saved.retain(|s| s.closed_at == 0 || transcript(&s.id).is_some());
+        self.save();
+    }
+
+    /// Marks sessions closed now: offered after a reboot and declined, they stay in the list.
+    pub fn mark_closed(&mut self, ids: &[String]) {
+        let now = state::now_ms();
+        for s in self.saved.iter_mut().filter(|s| ids.contains(&s.id)) {
+            s.closed_at = now;
+        }
+        self.save();
     }
 
     pub fn forget(&mut self, ids: &[String]) {
@@ -182,20 +224,29 @@ pub fn reopen(mut list: Vec<Saved>, home_in: &str) {
             if !numbers.contains(&s.window) {
                 numbers.push(s.window);
             }
-            let window = format!("agents-{}", numbers.iter().position(|w| *w == s.window).unwrap() + 1);
-            let mut wt = std::process::Command::new("wt");
-            wt.args(command_line(s, &window));
-            // Started from inside a Claude session, the app carries its markers; a session that
-            // inherits them runs as that session's child (no transcript saving).
-            for (key, _) in std::env::vars().filter(|(k, _)| k.starts_with("CLAUDE")) {
-                wt.env_remove(key);
-            }
-            if let Err(e) = wt.spawn() {
-                eprintln!("reopen {}: {e}", s.id);
-            }
+            open_tab(s, &format!("agents-{}", numbers.iter().position(|w| *w == s.window).unwrap() + 1));
             std::thread::sleep(Duration::from_secs(3));
         }
     });
+}
+
+/// Reopens one session in a new tab of the Windows Terminal window used last.
+pub fn reopen_one(mut s: Saved, home_in: &str) {
+    s.cwd = start_folder(&s.cwd, &std::env::var("USERPROFILE").unwrap_or_default(), home_in);
+    open_tab(&s, "0");
+}
+
+fn open_tab(s: &Saved, window: &str) {
+    let mut wt = std::process::Command::new("wt");
+    wt.args(command_line(s, window));
+    // Started from inside a Claude session, the app carries its markers; a session that
+    // inherits them runs as that session's child (no transcript saving).
+    for (key, _) in std::env::vars().filter(|(k, _)| k.starts_with("CLAUDE")) {
+        wt.env_remove(key);
+    }
+    if let Err(e) = wt.spawn() {
+        eprintln!("reopen {}: {e}", s.id);
+    }
 }
 
 #[cfg(test)]
@@ -210,6 +261,23 @@ mod tests {
         assert_eq!(start_folder(r"C:\Users\me", r"C:\Users\me", ""), r"C:\Users\me");
     }
 
+    #[test]
+    fn inactive_last_closed_first() {
+        let saved = |id: &str, closed_at| Saved { id: id.into(), label: id.into(), closed_at, ..Saved::default() };
+        let memory = Memory {
+            saved: vec![saved("a", 100), saved("live", 0), saved("b", 0), saved("c", 300)],
+            reopen_home_in: String::new(),
+            seen: HashSet::new(),
+            gone: HashMap::new(),
+            reopening: HashMap::new(),
+        };
+        let live = [Session { pid: 1, id: "live".into(), name: "live".into(), named: true, interactive: true, title: String::new(), status: "idle".into(), waiting_for: String::new(), cwd: String::new(), since_ms: 0 }];
+        // Open when the app last saw it (a reboot closed it) first, then the last closed.
+        let ids: Vec<String> = memory.inactive(&live).into_iter().map(|s| s.id).collect();
+        assert_eq!(ids, ["b", "c", "a"]);
+        // Only the one never closed while the app ran is offered after a reboot.
+        assert_eq!(memory.closed(&live).len(), 1);
+    }
     #[test]
     fn reopen_command() {
         let s = Saved { id: "abc".into(), name: "api-server".into(), cwd: r"C:\Work".into(), mode: "bypassPermissions".into(), ..Saved::default() };

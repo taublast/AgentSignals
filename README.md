@@ -30,7 +30,7 @@ A small Windows app written in Rust, its UI drawn with [DrawnUi.Rust](https://gi
 **After a reboot** the list starts with "20 sessions from last time are closed" and their names.
 **Reopen 20 sessions from last time** reopens each one with `claude --resume`: its conversation,
 its start folder, its permission mode and its name, in Windows Terminal, grouped into windows and
-tabs as they were, a few seconds apart. **Not now** forgets them. A reopened session waits for you;
+tabs as they were, a few seconds apart. **Not now** hides the offer; they stay in the list as closed sessions. A reopened session waits for you;
 it does not continue interrupted work by itself.
 
 ### Sessions started in your home folder
@@ -50,9 +50,10 @@ To have Agent Signals reopen them there too, set `"reopen_home_in": "C:\\Users\\
 `%APPDATA%\AgentSignals\sessions.json` while the app is closed.
 
 **One row per Claude Code session**, in this order: waiting for you first, then working, then idle
-with the one that finished last on top.
+with the one that finished last on top, then closed with the one closed last on top.
 
-- **Click** a row: its Windows Terminal tab comes to the front.
+- **Click** a row: its Windows Terminal tab comes to the front. Click a closed (gray) row and it
+  opens again in a new Windows Terminal tab, with its conversation.
 - **Right-click** a row (or the Menu key):
   - **Copy name**: the session's name, to paste into a message to it or to another agent.
   - **🔊 Announce when finished**: the app says "<name> finished" every time it finishes.
@@ -62,10 +63,17 @@ with the one that finished last on top.
   - **⚡ Flash taskbar when finished**: the session's terminal window flashes on the taskbar until
     you switch to it. Taskbar buttons are usually grouped, so the Windows Terminal button flashes:
     hover it to see which window. Outside Windows Terminal, Agent Signals' own button flashes.
-  - **Close session**: closes its terminal tab after you confirm. Claude ends there;
-    `claude --resume` brings the conversation back.
+  - **Close session**: closes its terminal tab after you confirm. Claude ends there; the session
+    stays in the list, gray, and a click reopens it.
 
   Each signal item turns into "Stop ..." once it is on; choose it again to turn it off.
+
+  On a closed session the menu has **Copy name**, **Reopen** and **Remove** (takes it off the list;
+  the conversation itself stays, `claude --resume` still finds it).
+
+**Closed sessions** stay in the list when you close their terminal, until you remove them. Only
+sessions that run in a terminal are kept, and only once they have a conversation (a session closed
+before its first message has nothing to reopen).
 
 **Recent**: the last status changes ("frontend finished after 17m") and which signals they gave.
 
@@ -78,6 +86,7 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 | 🔴 red dot | The session waits for you: a question, a permission dialog. |
 | 🟡 yellow dot | The session is working. |
 | 🟢 dark green dot | The session is idle: it finished and has nothing to do. |
+| ⚪ gray dot, "closed 2h" | The session is closed: its terminal is gone. Click to reopen it. |
 | ✋ 1m | Waiting for you, for 1 minute so far. |
 | ⚙ 4m | Working, for 4 minutes so far. |
 | 18m (no icon) | Idle, finished 18 minutes ago. |
@@ -201,7 +210,7 @@ Localhost only, no authentication: any local process can make it beep.
   each session's transcript, its first lines (start folder), its last lines (permission mode) and,
   for a session without a name of its own, its title.
 - Writes `%APPDATA%\AgentSignals\rules.json`, `sessions.json` (the open terminal sessions; a
-  session that closes is forgotten 30 s later, so a shutdown keeps them all) and, after a crash, `crash.log`; registers the toast AUMID under
+  closed ones stay until you remove them) and, after a crash, `crash.log`; registers the toast AUMID under
   `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
 - Starts `wt` (Windows Terminal) only when you reopen sessions.
 - Sends nothing anywhere: the API listens on 127.0.0.1 only.

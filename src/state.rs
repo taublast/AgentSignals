@@ -116,6 +116,8 @@ pub struct State {
     pub muted: bool,
     /// Sessions open last time and closed now (a reboot): the window offers to reopen them.
     pub reopen: Vec<crate::restore::Saved>,
+    /// Remembered terminal sessions not running now (closed, or closed by a reboot), last closed first.
+    pub inactive: Vec<crate::restore::Saved>,
 }
 
 impl State {

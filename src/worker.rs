@@ -20,8 +20,12 @@ pub enum Cmd {
     Topmost(bool),
     /// Reopen the sessions a reboot closed (`State::reopen`).
     Reopen,
-    /// Forget them instead.
+    /// Not now: they stay in the list as closed sessions.
     Dismiss,
+    /// Reopen one closed session (its id).
+    ReopenOne(String),
+    /// Remove a closed session from the list (its id).
+    Forget(String),
 }
 
 /// The tab layout is read again at least this often, to follow tabs moved by hand.
@@ -126,12 +130,17 @@ fn remember(
         *layout_ids = ids;
         *layout_at = Instant::now();
     }
-    memory.forget_expired();
+    memory.close_expired();
     // Offered sessions that got opened some other way leave the offer.
     let mut st = shared.lock().unwrap();
     let before = st.reopen.len();
     st.reopen.retain(|r| !list.iter().any(|s| s.id == r.id));
     if st.reopen.len() != before {
+        st.version += 1;
+    }
+    let inactive = memory.inactive(&list);
+    if inactive != st.inactive {
+        st.inactive = inactive;
         st.version += 1;
     }
 }
@@ -146,13 +155,41 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<
             let mut st = shared.lock().unwrap();
             let list = std::mem::take(&mut st.reopen);
             log_reopen(&mut st, list.len());
+            memory.reopening.extend(list.iter().map(|s| (s.id.clone(), Instant::now())));
             restore::reopen(list, &memory.reopen_home_in);
         }
         Cmd::Dismiss => {
             let mut st = shared.lock().unwrap();
             let ids: Vec<String> = std::mem::take(&mut st.reopen).into_iter().map(|s| s.id).collect();
             st.version += 1;
-            memory.forget(&ids);
+            memory.mark_closed(&ids);
+        }
+        Cmd::ReopenOne(id) => {
+            // Never a second process on one conversation: not while it runs, not while its tab
+            // is still starting (a second click).
+            let running = shared.lock().unwrap().sessions.iter().any(|s| s.id == id);
+            if running || memory.reopening.get(&id).is_some_and(|t| t.elapsed() < Duration::from_secs(20)) {
+                return;
+            }
+            memory.reopening.insert(id.clone(), Instant::now());
+            if let Some(s) = memory.saved.iter().find(|s| s.id == id) {
+                shared.lock().unwrap().log(Event {
+                    at_ms: state::now_ms(),
+                    pid: 0,
+                    session: s.label.clone(),
+                    kind: "reopened".into(),
+                    busy_ms: 0,
+                    fired: String::new(),
+                });
+                restore::reopen_one(s.clone(), &memory.reopen_home_in);
+            }
+        }
+        Cmd::Forget(id) => {
+            memory.forget(&[id.clone()]);
+            let mut st = shared.lock().unwrap();
+            st.inactive.retain(|s| s.id != id);
+            st.reopen.retain(|s| s.id != id);
+            st.version += 1;
         }
         Cmd::Signal(action, name) => {
             let muted = shared.lock().unwrap().muted;

@@ -8,6 +8,7 @@ mod win;
 mod worker;
 
 use drawnui::prelude::*;
+use restore::Saved;
 use state::{Event, Rule, Session, Shared, Signal, State};
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
@@ -40,10 +41,12 @@ struct App {
     muted: bool,
     /// Labels of the sessions a reboot closed, offered for reopening.
     reopen: Vec<String>,
+    /// Terminal sessions not running now: gray rows, a click reopens one.
+    inactive: Vec<Saved>,
     /// The user folder: a session started there shows no folder line.
     home: String,
     /// What the rows were built from: rebuilt only when it changes.
-    session_key: Vec<(u32, String)>,
+    session_key: (Vec<(u32, String)>, Vec<String>),
     root: Handle<SkiaLayout>,
     session_stack: Handle<SkiaLayout>,
     /// The right-click menu of a session, while open.
@@ -55,6 +58,8 @@ struct App {
 
 struct Menu {
     name: String,
+    /// A closed session's id: the menu offers Reopen and Remove.
+    closed: Option<String>,
     x: f32,
     y: f32,
     /// "Close session" chosen: the menu asks to confirm.
@@ -64,6 +69,10 @@ struct Menu {
 impl App {
     fn session(&self, pid: u32) -> Option<&Session> {
         self.sessions.iter().find(|s| s.pid == pid)
+    }
+
+    fn inactive(&self, id: &str) -> Option<&Saved> {
+        self.inactive.iter().find(|s| s.id == id)
     }
 }
 
@@ -97,7 +106,8 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                 )),
                 label("", 13).text_color(hex(0x9CA3AF)).vertical_options(LayoutOptions::Center).observe(|me, app: &App| {
                     let count = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
-                    me.set_text(format!("{} waiting · {} busy · {} idle", count("waiting"), count("busy"), count("idle")));
+                    let closed = if app.inactive.is_empty() { String::new() } else { format!(" · {} closed", app.inactive.len()) };
+                    me.set_text(format!("{} waiting · {} busy · {} idle{closed}", count("waiting"), count("busy"), count("idle")));
                 }),
             )),
             SkiaScroll::new()
@@ -185,7 +195,7 @@ fn menu_overlay() -> Build<SkiaLayout> {
                 }
             })
             .children((
-                SkiaStack::new().observe(|me, app: &App| me.set_is_visible(app.menu.as_ref().is_some_and(|m| !m.confirm))).children((
+                SkiaStack::new().observe(|me, app: &App| me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.closed.is_none() && !m.confirm))).children((
                     menu_item("Copy name", |app, cx| {
                         if let Some(m) = app.menu.take() {
                             cx.set_clipboard(m.name);
@@ -201,6 +211,24 @@ fn menu_overlay() -> Build<SkiaLayout> {
                         }
                     }),
                 )),
+                // A closed session.
+                SkiaStack::new().observe(|me, app: &App| me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.closed.is_some()))).children((
+                    menu_item("Copy name", |app, cx| {
+                        if let Some(m) = app.menu.take() {
+                            cx.set_clipboard(m.name);
+                        }
+                    }),
+                    menu_item("Reopen", |app, _cx| {
+                        if let Some(id) = app.menu.take().and_then(|m| m.closed) {
+                            let _ = app.tx.send(Cmd::ReopenOne(id));
+                        }
+                    }),
+                    menu_item("Remove", |app, _cx| {
+                        if let Some(id) = app.menu.take().and_then(|m| m.closed) {
+                            let _ = app.tx.send(Cmd::Forget(id));
+                        }
+                    }),
+                )),
                 SkiaStack::new()
                     .padding((10, 8, 10, 8))
                     .spacing(10)
@@ -208,7 +236,7 @@ fn menu_overlay() -> Build<SkiaLayout> {
                     .children((
                         label("", 13).observe(|me, app: &App| {
                             if let Some(m) = &app.menu {
-                                me.set_text(format!("Close the terminal tab of {}? Resume later with claude --resume.", m.name));
+                                me.set_text(format!("Close the terminal tab of {}? It stays in the list: click it to reopen.", m.name));
                             }
                         }),
                         SkiaRow::new().spacing(8).children((
@@ -308,7 +336,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
             }
         })
         .on_context_menu(move |_me, app: &mut App, _cx, at| {
-            app.menu = Some(Menu { name: menu.clone(), x: at.location.x, y: at.location.y, confirm: false });
+            app.menu = Some(Menu { name: menu.clone(), closed: None, x: at.location.x, y: at.location.y, confirm: false });
             true
         })
         .children((
@@ -358,6 +386,53 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
         ))
 }
 
+/// A terminal session that is not running: gray, a click reopens it in Windows Terminal.
+fn closed_row(id: String, name: String) -> Build<SkiaShape> {
+    let (reopen, menu, folder) = (id.clone(), id.clone(), id.clone());
+    SkiaShape::new()
+        .corner_radius(10)
+        .background_color(hex(0x1C2030))
+        .padding((12, 10, 12, 10))
+        .fill_x()
+        .accessibility_role(Aria::BUTTON)
+        .accessibility_label(format!("{name}, closed, reopen"))
+        .animation_tapped(SkiaTouchAnimation::Ripple)
+        .consume_gestures(|_me, app: &mut App, _cx, gesture| {
+            app.button = gesture.button;
+            false
+        })
+        .on_tapped(move |_me, app: &mut App, _cx| {
+            if app.button == MouseButton::Left {
+                let _ = app.tx.send(Cmd::ReopenOne(reopen.clone()));
+            }
+        })
+        .on_context_menu(move |_me, app: &mut App, _cx, at| {
+            let name = app.inactive(&menu).map_or(String::new(), |s| s.label.clone());
+            app.menu = Some(Menu { name, closed: Some(menu.clone()), x: at.location.x, y: at.location.y, confirm: false });
+            true
+        })
+        .children((
+            SkiaShape::new().corner_radius(5).width_request(10).height_request(10).vertical_options(LayoutOptions::Center).background_color(hex(0x6B7280)),
+            SkiaStack::new().margin((22, 0, 84, 0)).spacing(2).children((
+                label(&name, 15).text_color(hex(0x9CA3AF)),
+                label("", 12).text_color(hex(0x6B7280)).max_lines(2).observe(move |me, app: &App| {
+                    let cwd = app.inactive(&folder).map_or("", |s| s.cwd.as_str());
+                    let show = !cwd.eq_ignore_ascii_case(&app.home);
+                    me.set_is_visible(show);
+                    me.set_text(if show { cwd.to_string() } else { String::new() });
+                }),
+            )),
+            label("", 12)
+                .text_color(hex(0x6B7280))
+                .horizontal_options(LayoutOptions::End)
+                .vertical_options(LayoutOptions::Center)
+                .observe(move |me, app: &App| {
+                    let at = app.inactive(&id).map_or(0, |s| s.closed_at);
+                    me.set_text(if at == 0 { "closed".to_string() } else { format!("closed {}", state::age(app.now.saturating_sub(at))) });
+                }),
+        ))
+}
+
 fn recent(app: &App) -> String {
     if app.events.is_empty() {
         return "Nothing yet.".into();
@@ -395,12 +470,19 @@ fn sync(app: &mut App, cx: &mut Cx) {
         app.notes = st.notes.clone();
         app.muted = st.muted;
         app.reopen = st.reopen.iter().map(|s| s.label.clone()).collect();
+        app.inactive = st.inactive.clone();
         drop(st);
-        let key: Vec<(u32, String)> = app.sessions.iter().map(|s| (s.pid, s.name.clone())).collect();
+        let key = (
+            app.sessions.iter().map(|s| (s.pid, s.name.clone())).collect::<Vec<_>>(),
+            app.inactive.iter().map(|s| s.id.clone()).collect::<Vec<_>>(),
+        );
         if key != app.session_key {
             cx.clear_children(app.session_stack);
-            for (pid, name) in &key {
+            for (pid, name) in &key.0 {
                 cx.add_child(app.session_stack, session_row(*pid, name.clone()));
+            }
+            for s in &app.inactive {
+                cx.add_child(app.session_stack, closed_row(s.id.clone(), s.label.clone()));
             }
             app.session_key = key;
         }
@@ -441,7 +523,8 @@ pub fn run() {
             muted: false,
             reopen: Vec::new(),
             home: std::env::var("USERPROFILE").unwrap_or_default(),
-            session_key: Vec::new(),
+            session_key: (Vec::new(), Vec::new()),
+            inactive: Vec::new(),
             root: Handle::default(),
             session_stack: Handle::default(),
             menu: None,
