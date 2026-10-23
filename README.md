@@ -1,4 +1,4 @@
-# Agent Signals
+<img src="docs/banner.png" alt="Agent Signals: every Claude Code session in one small window">
 
 If you have dozens of terminals open, each with a Claude Code agent at work, you know the problem:
 which one is done, which one is waiting for your answer, and which one is still busy? Agent Signals
