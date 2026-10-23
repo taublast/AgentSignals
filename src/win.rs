@@ -17,7 +17,7 @@ use windows::Win32::UI::Accessibility::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FLASHW_ALL, FLASHW_TIMERNOFG, FLASHWINFO, FlashWindowEx, GetClassNameW, GetWindowTextW,
-    GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE,
+    GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, MB_ICONERROR, MB_OK, MessageBoxW, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE,
     SWP_NOSIZE, SetForegroundWindow, SetWindowPos, ShowWindow,
 };
 use windows::core::{BOOL, HSTRING, Result, w};
@@ -249,6 +249,13 @@ pub fn raise(hwnd: HWND) {
         if !SetForegroundWindow(hwnd).as_bool() {
             flash(hwnd);
         }
+    }
+}
+
+/// A blocking error message, for when the app cannot start.
+pub fn error_box(text: &str) {
+    unsafe {
+        MessageBoxW(None, &HSTRING::from(text), &HSTRING::from(crate::TITLE), MB_OK | MB_ICONERROR);
     }
 }
 

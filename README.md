@@ -113,8 +113,8 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 - **Optional, for agents**: a local API (below) lets Claude agents add rules (also for `waiting`,
   `started`, `closed`), signal right away, or post a status line under a session.
 
-Windows 10 or 11. Selecting and closing terminal tabs needs Windows Terminal; the list and the
-signals work with any terminal.
+Windows 10 or 11 with Claude Code installed (any installer: native or npm). Selecting, closing and
+reopening terminal tabs needs Windows Terminal; the list and the signals work with any terminal.
 
 ## Download
 
@@ -142,6 +142,11 @@ info**, then **Run anyway**. Prefer to build it yourself? Read on.
    builds take seconds. Starting it a second time flashes the running one instead.
 3. For a release file: `dev\release.ps1` builds `target\dist\release\agentsignals.exe` with local
    folder paths remapped out of the binary, and fails if any is left.
+4. To check a build the way a new machine meets it, with the app closed: `dev\machine-test.ps1`
+   (or `dev\machine-test.ps1 target\dist\release\agentsignals.exe`). It starts the app on a fresh
+   empty profile, starts it twice, starts it while another program holds its port (an error
+   message must show), then runs the unit tests and a live Windows Terminal test that opens one tab
+   and closes it.
 
 ### Start with Windows (optional)
 
@@ -201,6 +206,9 @@ Localhost only, no authentication: any local process can make it beep.
   reads that title from the transcript tail to find the tab.
 - A toast needs the per-user AUMID `AgentSignals`, registered on start under
   `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
+- A session that cannot be reopened (Claude Code or Windows Terminal not found) shows under Recent
+  as "not reopened" with the reason. A start folder that no longer exists reopens in your home
+  folder (or `reopen_home_in`).
 - API `raise`: Windows may refuse to bring a window forward from the background; the taskbar button
   flashes instead.
 

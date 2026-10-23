@@ -29,13 +29,25 @@ pub fn bind() -> Option<TcpListener> {
     TcpListener::bind(("127.0.0.1", PORT)).ok()
 }
 
-/// Asks the instance already running to come to the front.
-pub fn poke_running() {
-    let body = r#"{"raise":true}"#;
-    if let Ok(mut s) = TcpStream::connect(("127.0.0.1", PORT)) {
-        let _ = write!(s, "POST /signal HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len());
-        let _ = s.read(&mut [0u8; 256]);
+/// Asks the instance already running to come to the front. False when what holds the port is
+/// not Agent Signals (another program, or nothing that answers).
+pub fn poke_running() -> bool {
+    let ask = |request: String| -> String {
+        let Ok(mut s) = TcpStream::connect_timeout(&(std::net::Ipv4Addr::LOCALHOST, PORT).into(), Duration::from_secs(2)) else { return String::new() };
+        let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+        let _ = s.set_write_timeout(Some(Duration::from_secs(2)));
+        let mut answer = Vec::new();
+        if s.write_all(request.as_bytes()).is_ok() {
+            let _ = s.read_to_end(&mut answer);
+        }
+        String::from_utf8_lossy(&answer).into_owned()
+    };
+    if !ask("GET / HTTP/1.1\r\n\r\n".into()).contains("Agent Signals API") {
+        return false;
     }
+    let body = r#"{"raise":true}"#;
+    ask(format!("POST /signal HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()));
+    true
 }
 
 pub fn start(listener: TcpListener, shared: Shared, tx: Sender<Cmd>) {

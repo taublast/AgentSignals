@@ -145,6 +145,11 @@ fn remember(
     }
 }
 
+/// A session that could not be reopened, and why, in Recent.
+fn log_failed(shared: &Shared, label: &str, why: String) {
+    shared.lock().unwrap().log(Event { at_ms: state::now_ms(), pid: 0, session: label.into(), kind: "not reopened".into(), busy_ms: 0, fired: why });
+}
+
 fn log_reopen(st: &mut state::State, count: usize) {
     st.log(Event { at_ms: state::now_ms(), pid: 0, session: format!("{count} sessions"), kind: "reopened".into(), busy_ms: 0, fired: String::new() });
 }
@@ -156,7 +161,8 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<
             let list = std::mem::take(&mut st.reopen);
             log_reopen(&mut st, list.len());
             memory.reopening.extend(list.iter().map(|s| (s.id.clone(), Instant::now())));
-            restore::reopen(list, &memory.reopen_home_in);
+            let shared = shared.clone();
+            restore::reopen(list, &memory.reopen_home_in, move |s, why| log_failed(&shared, &s.label, why));
         }
         Cmd::Dismiss => {
             let mut st = shared.lock().unwrap();
@@ -171,17 +177,20 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<
             if running || memory.reopening.get(&id).is_some_and(|t| t.elapsed() < Duration::from_secs(20)) {
                 return;
             }
-            memory.reopening.insert(id.clone(), Instant::now());
-            if let Some(s) = memory.saved.iter().find(|s| s.id == id) {
-                shared.lock().unwrap().log(Event {
-                    at_ms: state::now_ms(),
-                    pid: 0,
-                    session: s.label.clone(),
-                    kind: "reopened".into(),
-                    busy_ms: 0,
-                    fired: String::new(),
-                });
-                restore::reopen_one(s.clone(), &memory.reopen_home_in);
+            let Some(s) = memory.saved.iter().find(|s| s.id == id).cloned() else { return };
+            match restore::reopen_one(s.clone(), &memory.reopen_home_in) {
+                Ok(()) => {
+                    memory.reopening.insert(id, Instant::now());
+                    shared.lock().unwrap().log(Event {
+                        at_ms: state::now_ms(),
+                        pid: 0,
+                        session: s.label,
+                        kind: "reopened".into(),
+                        busy_ms: 0,
+                        fired: String::new(),
+                    });
+                }
+                Err(why) => log_failed(shared, &s.label, why),
             }
         }
         Cmd::Forget(id) => {
@@ -404,4 +413,50 @@ fn transcript_title(cwd: &str, session_id: &str) -> String {
             .find_map(|l| serde_json::from_str::<Value>(l).ok()?.get(field)?.as_str().map(str::to_string))
     };
     last("\"custom-title\"", "customTitle").or_else(|| last("\"ai-title\"", "aiTitle")).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session(json: &str) -> Option<Session> {
+        parse(&serde_json::from_str(json).unwrap())
+    }
+
+    /// Session files of the kinds Claude Code writes, old and new: none may break the list.
+    #[test]
+    fn session_files() {
+        let s = session(r#"{"pid":1,"sessionId":"a","cwd":"C:\\Work\\shop","name":"api","nameSource":"user","kind":"interactive","entrypoint":"cli","status":"shell","statusUpdatedAt":5}"#).unwrap();
+        assert!(s.interactive && s.named);
+        assert_eq!((s.name.as_str(), s.status.as_str(), s.since_ms), ("api", "busy", 5));
+        // A background job and a one-shot `-p` run are listed, never remembered for reopening.
+        assert!(!session(r#"{"pid":2,"sessionId":"b","kind":"bg","entrypoint":"cli","name":"job"}"#).unwrap().interactive);
+        assert!(!session(r#"{"pid":3,"sessionId":"c","kind":"interactive","entrypoint":"sdk-cli"}"#).unwrap().interactive);
+        // An older file: no kind, entrypoint, name or status.
+        let old = session(r#"{"pid":4,"sessionId":"d","cwd":"C:\\Work\\shop"}"#).unwrap();
+        assert!(old.interactive);
+        assert_eq!((old.name.as_str(), old.status.as_str(), old.since_ms), ("shop", "idle", 0));
+        // Not a session file.
+        assert!(session(r#"{"name":"x"}"#).is_none());
+        assert!(session(r#"{"pid":"x"}"#).is_none());
+    }
+
+    /// The sessions folder: missing, or holding broken and foreign files.
+    #[test]
+    fn sessions_folder() {
+        let mut files = HashMap::new();
+        let dir = std::env::temp_dir().join(format!("agentsignals-test-{}-sessions", std::process::id()));
+        assert!(poll(&dir, &mut files).is_empty());
+        std::fs::create_dir_all(&dir).unwrap();
+        let me = std::process::id();
+        std::fs::write(dir.join(format!("{me}.json")), format!(r#"{{"pid":{me},"sessionId":"a","name":"me","nameSource":"user"}}"#)).unwrap();
+        std::fs::write(dir.join("1.json"), "{ not json").unwrap();
+        std::fs::write(dir.join("notes.txt"), "hello").unwrap();
+        // A file of a process that ended.
+        std::fs::write(dir.join("4000000.json"), r#"{"pid":4000000,"sessionId":"z","name":"gone"}"#).unwrap();
+        let live = poll(&dir, &mut files);
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[&me].name, "me");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

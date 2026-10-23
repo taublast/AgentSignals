@@ -188,30 +188,51 @@ fn launch_info(id: &str) -> Option<(String, String)> {
     Some((cwd, mode))
 }
 
-/// The folder a session reopens in: `home_in` for one started in the home folder, when set.
+/// The folder a session reopens in: `home_in` for one started in the home folder, when set. A
+/// folder that is gone (moved, deleted) gives `home_in` or the home folder: Windows Terminal starts
+/// nothing in a missing folder.
 fn start_folder(cwd: &str, home: &str, home_in: &str) -> String {
-    if !home_in.is_empty() && cwd.trim_end_matches('\\').eq_ignore_ascii_case(home.trim_end_matches('\\')) {
+    let is_dir = |f: &str| !f.is_empty() && std::path::Path::new(f).is_dir();
+    let from_home = cwd.trim_end_matches('\\').eq_ignore_ascii_case(home.trim_end_matches('\\'));
+    if (from_home || !is_dir(cwd)) && is_dir(home_in) {
         home_in.to_string()
+    } else if !is_dir(cwd) {
+        home.to_string()
     } else {
         cwd.to_string()
     }
 }
 
-/// The Windows Terminal command line that reopens one session.
-pub fn command_line(s: &Saved, window: &str) -> Vec<String> {
-    let mut args: Vec<String> = ["-w", window, "nt", "-d", &s.cwd, "claude", "--resume", &s.id].iter().map(|a| a.to_string()).collect();
+/// Claude Code's program: the first `claude.exe`, `claude.cmd` or `claude.bat` in `dirs`. Windows
+/// Terminal finds a bare `claude` only as an .exe, so npm's `claude.cmd` needs its full path.
+fn find_claude(dirs: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    dirs.into_iter().flat_map(|d| ["claude.exe", "claude.cmd", "claude.bat"].map(|f| d.join(f))).find(|p| p.is_file())
+}
+
+/// Claude Code on this machine: on PATH, else where its installers put it.
+fn claude() -> Option<PathBuf> {
+    let env = |k: &str| PathBuf::from(std::env::var(k).unwrap_or_default());
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    find_claude(std::env::split_paths(&path).chain([env("USERPROFILE").join(".local").join("bin"), env("APPDATA").join("npm")]))
+}
+
+/// The Windows Terminal command line that reopens one session with `claude` (the program's path).
+/// `;` separates Windows Terminal commands, so one in a name or folder is escaped.
+pub fn command_line(s: &Saved, window: &str, claude: &str) -> Vec<String> {
+    let mut args: Vec<String> = ["-w", window, "nt", "-d", &s.cwd, claude, "--resume", &s.id].iter().map(|a| a.to_string()).collect();
     if !s.mode.is_empty() {
         args.extend(["--permission-mode".into(), s.mode.clone()]);
     }
     if !s.name.is_empty() {
         args.extend(["-n".into(), s.name.clone()]);
     }
-    args
+    args.into_iter().map(|a| a.replace(';', "\\;")).collect()
 }
 
 /// Reopens the sessions in their windows and tab order, a few seconds apart, on a thread of its own;
-/// sessions started in the home folder in `home_in` when it is set.
-pub fn reopen(mut list: Vec<Saved>, home_in: &str) {
+/// sessions started in the home folder in `home_in` when it is set. `failed` hears why one could not
+/// be started; the rest are not tried then (the same reason would stop them all).
+pub fn reopen(mut list: Vec<Saved>, home_in: &str, failed: impl Fn(&Saved, String) + Send + 'static) {
     list.sort_by_key(|s| (s.window, s.tab));
     let home = std::env::var("USERPROFILE").unwrap_or_default();
     for s in &mut list {
@@ -224,41 +245,85 @@ pub fn reopen(mut list: Vec<Saved>, home_in: &str) {
             if !numbers.contains(&s.window) {
                 numbers.push(s.window);
             }
-            open_tab(s, &format!("agents-{}", numbers.iter().position(|w| *w == s.window).unwrap() + 1));
+            if let Err(e) = open_tab(s, &format!("agents-{}", numbers.iter().position(|w| *w == s.window).unwrap() + 1)) {
+                failed(s, e);
+                return;
+            }
             std::thread::sleep(Duration::from_secs(3));
         }
     });
 }
 
 /// Reopens one session in a new tab of the Windows Terminal window used last.
-pub fn reopen_one(mut s: Saved, home_in: &str) {
+pub fn reopen_one(mut s: Saved, home_in: &str) -> Result<(), String> {
     s.cwd = start_folder(&s.cwd, &std::env::var("USERPROFILE").unwrap_or_default(), home_in);
-    open_tab(&s, "0");
+    open_tab(&s, "0")
 }
 
-fn open_tab(s: &Saved, window: &str) {
+fn open_tab(s: &Saved, window: &str) -> Result<(), String> {
+    launch(s, window, &claude().ok_or("Claude Code (claude) not found")?)
+}
+
+fn launch(s: &Saved, window: &str, claude: &std::path::Path) -> Result<(), String> {
     let mut wt = std::process::Command::new("wt");
-    wt.args(command_line(s, window));
+    wt.args(command_line(s, window, &claude.to_string_lossy()));
     // Started from inside a Claude session, the app carries its markers; a session that
     // inherits them runs as that session's child (no transcript saving).
     for (key, _) in std::env::vars().filter(|(k, _)| k.starts_with("CLAUDE")) {
         wt.env_remove(key);
     }
-    if let Err(e) = wt.spawn() {
-        eprintln!("reopen {}: {e}", s.id);
-    }
+    wt.spawn().map(|_| ()).map_err(|e| format!("Windows Terminal (wt) could not start: {e}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A fresh folder under the system temp folder.
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("agentsignals-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
-    fn home_sessions_reopen_elsewhere() {
-        assert_eq!(start_folder(r"C:\Users\me", r"C:\Users\me", r"C:\Users\me\Agents"), r"C:\Users\me\Agents");
-        assert_eq!(start_folder(r"c:\users\ME\", r"C:\Users\me", r"C:\Users\me\Agents"), r"C:\Users\me\Agents");
-        assert_eq!(start_folder(r"C:\Work\repo", r"C:\Users\me", r"C:\Users\me\Agents"), r"C:\Work\repo");
-        assert_eq!(start_folder(r"C:\Users\me", r"C:\Users\me", ""), r"C:\Users\me");
+    fn start_folders() {
+        let root = temp("folders");
+        let (home, agents, work) = (root.join("me"), root.join("me").join("Agents"), root.join("work"));
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        let [home, agents, work] = [&home, &agents, &work].map(|p| p.to_string_lossy().into_owned());
+        let gone = root.join("deleted").to_string_lossy().into_owned();
+        // Started in the home folder: reopens in home_in when set, else at home.
+        assert_eq!(start_folder(&home, &home, &agents), agents);
+        assert_eq!(start_folder(&(home.to_uppercase() + "\\"), &home, &agents), agents);
+        assert_eq!(start_folder(&home, &home, ""), home);
+        // Started elsewhere: there.
+        assert_eq!(start_folder(&work, &home, &agents), work);
+        // That folder is gone: home_in, else home; a missing home_in counts as unset.
+        assert_eq!(start_folder(&gone, &home, &agents), agents);
+        assert_eq!(start_folder(&gone, &home, ""), home);
+        assert_eq!(start_folder(&home, &home, &gone), home);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn claude_from_any_installer() {
+        let root = temp("claude");
+        let (native, npm, empty) = (root.join("native"), root.join("npm"), root.join("empty"));
+        for d in [&native, &npm, &empty] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(native.join("claude.exe"), "").unwrap();
+        std::fs::write(npm.join("claude.cmd"), "").unwrap();
+        // npm's claude.cmd alone: found by its full path.
+        assert_eq!(find_claude([empty.clone(), npm.clone()]), Some(npm.join("claude.cmd")));
+        // The first folder on PATH wins, as in a terminal.
+        assert_eq!(find_claude([npm.clone(), native.clone()]), Some(npm.join("claude.cmd")));
+        assert_eq!(find_claude([native.clone(), npm.clone()]), Some(native.join("claude.exe")));
+        assert_eq!(find_claude([empty.clone()]), None);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -278,14 +343,50 @@ mod tests {
         // Only the one never closed while the app ran is offered after a reboot.
         assert_eq!(memory.closed(&live).len(), 1);
     }
+
     #[test]
     fn reopen_command() {
+        let claude = r"C:\Users\me\.local\bin\claude.exe";
         let s = Saved { id: "abc".into(), name: "api-server".into(), cwd: r"C:\Work".into(), mode: "bypassPermissions".into(), ..Saved::default() };
         assert_eq!(
-            command_line(&s, "agents-1").join(" "),
-            r"-w agents-1 nt -d C:\Work claude --resume abc --permission-mode bypassPermissions -n api-server"
+            command_line(&s, "agents-1", claude).join(" "),
+            r"-w agents-1 nt -d C:\Work C:\Users\me\.local\bin\claude.exe --resume abc --permission-mode bypassPermissions -n api-server"
         );
         let unnamed = Saved { id: "abc".into(), cwd: r"C:\Work".into(), ..Saved::default() };
-        assert_eq!(command_line(&unnamed, "agents-2").join(" "), r"-w agents-2 nt -d C:\Work claude --resume abc");
+        assert_eq!(command_line(&unnamed, "agents-2", claude).join(" "), r"-w agents-2 nt -d C:\Work C:\Users\me\.local\bin\claude.exe --resume abc");
+        // `;` would start a second Windows Terminal command.
+        let odd = Saved { id: "abc".into(), name: "a; b".into(), cwd: r"C:\x;y".into(), ..Saved::default() };
+        let line = command_line(&odd, "0", claude);
+        assert!(line.contains(&r"C:\x\;y".to_string()) && line.contains(&r"a\; b".to_string()));
+    }
+
+    /// Opens a real Windows Terminal tab with a stand-in for claude that writes down how it was
+    /// started: one tab, the right folder, the name in one piece. Run by hand:
+    /// `cargo test --release -- --ignored windows_terminal`.
+    #[test]
+    #[ignore]
+    fn windows_terminal_starts_the_session() {
+        let root = temp("wt");
+        let (bin, folder, log) = (root.join("fake bin"), root.join("my work; folder"), root.join("log.txt"));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&folder).unwrap();
+        // Like npm's claude.cmd; logs its arguments and folder, then the tab closes by itself.
+        std::fs::write(bin.join("claude.cmd"), format!("@echo ARGS=[%*] CWD=[%CD%]>> \"{}\"\r\n", log.display())).unwrap();
+        let s = Saved { id: "abc".into(), name: "my name; two".into(), cwd: folder.to_string_lossy().into_owned(), ..Saved::default() };
+        launch(&s, "agents-signals-test", &find_claude([bin]).unwrap()).unwrap();
+        let mut text = String::new();
+        for _ in 0..50 {
+            std::thread::sleep(Duration::from_millis(200));
+            text = std::fs::read_to_string(&log).unwrap_or_default();
+            if !text.is_empty() {
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_secs(1));
+        let text = std::fs::read_to_string(&log).unwrap_or(text);
+        assert_eq!(text.lines().count(), 1, "one tab started: {text}");
+        assert!(text.contains("--resume abc -n \"my name; two\""), "{text}");
+        assert!(text.contains(&format!("CWD=[{}]", folder.display())), "{text}");
+        let _ = std::fs::remove_dir_all(root);
     }
 }
