@@ -8,17 +8,16 @@
 # generated code), which name the builder's home folder; they are remapped to /cargo and /build
 # here, and the check near the end fails if a local path is left.
 #
-# Signing and notarizing need, once, on this machine:
-#   - a "Developer ID Application" certificate in the keychain (Xcode > Settings > Accounts >
-#     Manage Certificates > + > Developer ID Application);
-#   - a notarytool keychain profile named below:
-#       xcrun notarytool store-credentials agentsignals-notary \
-#           --apple-id <apple id> --team-id <team id> --password <app-specific password>
-# Without either, the script still builds the bundle and says what it skipped, so the bundle can be
+# Signing and notarizing need nothing stored on the machine: no Developer ID certificate in the
+# keychain and no app-specific password. Both go through the Apple ID that Xcode is signed in to
+# (Xcode > Settings > Accounts, a member of the team below). Xcode signs with a cloud-managed
+# Developer ID certificate, uploads for notarization over the same account, and hands the notarized
+# app back with its ticket stapled.
+# Signed out, or offline, the script still builds the bundle and says what it skipped, so it can be
 # built and run locally; such a bundle is only for testing and must not be released.
 set -eu
 
-PROFILE=agentsignals-notary
+TEAM=F5H2D34D9G
 BUNDLE_ID=com.appomobi.agentsignals
 APP_NAME="Agent Signals"
 MIN_MACOS=11.0
@@ -49,8 +48,10 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 lipo -create -output "$app/Contents/MacOS/agentsignals" \
     "$dist/aarch64-apple-darwin/release/agentsignals" \
     "$dist/x86_64-apple-darwin/release/agentsignals"
-# The engine reads assets from beside the binary; the font is also built in, so this is a spare.
-cp -R "$repo/assets" "$app/Contents/MacOS/assets"
+# Nothing but the binary goes in MacOS/: Apple's notary service reads everything there as code and
+# rejects the signature over a font or a licence sitting next to the executable ("The signature of
+# the binary is invalid"). The font the app draws with is built into the binary, so the bundle needs
+# no assets folder at all.
 
 # The icon: the same icon.ico the Windows build uses, as an .icns.
 iconset=$(mktemp -d)/AppIcon.iconset
@@ -95,39 +96,94 @@ for path in "$HOME" "$repo" "$(id -un)"; do
 done
 
 # ---------------------------------------------------------------- signature
-identity=$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
-if [ -z "$identity" ]; then
-    echo "WARNING: no Developer ID Application certificate; signing the bundle for local use only."
-    echo "         This bundle must not be released."
-    codesign --force --deep --sign - "$app"
-    signed=no
-else
-    # Hardened runtime and a secure timestamp: what notarization requires.
-    codesign --force --options runtime --timestamp --sign "$identity" "$app"
-    codesign --verify --strict --verbose=2 "$app"
-    signed=yes
-fi
+# Ad-hoc, with the hardened runtime turned on: Xcode's distribution step reads the runtime flag off
+# the binary it is given and refuses an input without it ("Hardened Runtime is Not Enabled"). It
+# replaces this signature with the real one.
+codesign --force --options runtime --sign - "$app"
 
 # ---------------------------------------------------------------- notarize
+# A hand-made archive is all `xcodebuild -exportArchive` needs to sign and submit.
+archive="$dist/AgentSignals.xcarchive"
+rm -rf "$archive" "$dist/notarized"
+mkdir -p "$archive/Products/Applications"
+cp -R "$app" "$archive/Products/Applications/"
+cat > "$archive/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>ArchiveVersion</key><integer>2</integer>
+    <key>Name</key><string>$APP_NAME</string>
+    <key>SchemeName</key><string>$APP_NAME</string>
+    <key>CreationDate</key><date>$(date -u +%Y-%m-%dT%H:%M:%SZ)</date>
+    <key>ApplicationProperties</key><dict>
+        <key>ApplicationPath</key><string>Applications/$APP_NAME.app</string>
+        <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
+        <key>CFBundleShortVersionString</key><string>$version</string>
+        <key>CFBundleVersion</key><string>$version</string>
+    </dict>
+</dict>
+</plist>
+PLIST
+cat > "$dist/exportOptions.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key><string>developer-id</string>
+    <key>teamID</key><string>$TEAM</string>
+    <key>signingStyle</key><string>automatic</string>
+    <key>destination</key><string>upload</string>
+</dict>
+</plist>
+PLIST
+
+release="$app"
+echo "signing and submitting for notarization"
+if xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$dist/exportOptions.plist" \
+        -exportPath "$dist/uploaded" -allowProvisioningUpdates > "$dist/upload.log" 2>&1; then
+    # Notarization takes a minute or two; the notarized app comes back with its ticket stapled.
+    echo "waiting for notarization"
+    for _ in $(seq 1 30); do
+        sleep 20
+        rm -rf "$dist/notarized"
+        if xcodebuild -exportNotarizedApp -archivePath "$archive" -exportPath "$dist/notarized" > "$dist/notarize.log" 2>&1; then
+            release="$dist/notarized/$APP_NAME.app"
+            break
+        fi
+        # "Invalid" is Apple's verdict, not a wait: stop and show why.
+        if grep -q 'error: Invalid' "$dist/notarize.log"; then
+            echo "notarization was refused; Apple's reasons:" >&2
+            for log in "$archive"/Submissions/*/notarization-log.json; do
+                [ -f "$log" ] && /usr/bin/python3 -c 'import json,sys
+d = json.load(open(sys.argv[1]))
+print(" ", d.get("status"), "-", d.get("statusSummary"))
+for i in d.get("issues") or []:
+    print("  -", i.get("severity"), i.get("path", ""), i.get("message"))' "$log" >&2
+            done
+            exit 1
+        fi
+    done
+    if [ "$release" = "$app" ]; then
+        echo "WARNING: notarization did not finish in time; see $dist/notarize.log." >&2
+        echo "         Run the script again: the submission keeps going on Apple's side." >&2
+        exit 1
+    fi
+    xcrun stapler validate "$release" > /dev/null
+    spctl --assess --type execute "$release" > /dev/null
+    echo "notarized, stapled, and Gatekeeper accepts it"
+else
+    echo "WARNING: could not sign through the Apple account; see $dist/upload.log."
+    echo "         The bundle below is ad-hoc signed for local use only and must not be released."
+fi
+
+# ---------------------------------------------------------------- the zip
 zip="$dist/AgentSignals-$version-macos.zip"
 rm -f "$zip"
 # ditto keeps the bundle's symlinks and metadata; a plain zip does not.
-ditto -c -k --keepParent "$app" "$zip"
-
-if [ "$signed" = yes ] && xcrun notarytool history --keychain-profile "$PROFILE" > /dev/null 2>&1; then
-    echo "notarizing"
-    xcrun notarytool submit "$zip" --keychain-profile "$PROFILE" --wait
-    xcrun stapler staple "$app"
-    # The stapled ticket lives in the bundle, so the zip is made again from it.
-    rm -f "$zip"
-    ditto -c -k --keepParent "$app" "$zip"
-    spctl --assess --type execute --verbose=4 "$app"
-else
-    [ "$signed" = yes ] && echo "WARNING: no notarytool profile '$PROFILE'; not notarized." \
-        || echo "not notarized (unsigned)."
-fi
+ditto -c -k --keepParent "$release" "$zip"
 
 echo
-echo "$app"
+echo "$release"
 echo "$zip"
 echo "SHA256 $(shasum -a 256 "$zip" | cut -d' ' -f1)"

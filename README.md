@@ -189,8 +189,9 @@ cargo build --release
 ./target/release/agentsignals
 ```
 
-Two permissions are asked for the first time they are needed, both under **System Settings >
-Privacy & Security**:
+The first launch of the download asks macOS for permission to open it; the app's window appears
+once that is answered. Two more permissions are asked for the first time they are needed, both
+under **System Settings > Privacy & Security**:
 
 - **Automation > Terminal** — for clicking a row (focus its tab), Close session, and reopening a
   session. Refused, those say so under Recent instead of failing quietly; the list and every signal
