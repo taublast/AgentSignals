@@ -9,6 +9,7 @@ S = 2
 W, H = 1280 * S, 640 * S
 BG = (18, 20, 28)
 TEXT, MUTED = (255, 255, 255), (156, 163, 175)
+ACCENT = (96, 165, 250)  # the app's blue, a shade lighter to read on the dark background
 RED, YELLOW, GREEN, GRAY = (239, 68, 68), (250, 204, 21), (34, 160, 70), (107, 114, 128)
 
 def font(name, size):
@@ -27,13 +28,13 @@ d = ImageDraw.Draw(img)
 # Left: icon, name, promise.
 icon = Image.open(rf"{REPO}\icon.ico")
 icon.size = (256, 256)
-icon = icon.convert("RGBA").resize((112 * S, 112 * S), Image.LANCZOS)
-img.paste(icon, (72 * S, 118 * S), icon)
-d.text((72 * S, 250 * S), "Agent Signals", font=font("segoeuib.ttf", 64), fill=TEXT)
-d.text((74 * S, 342 * S), "Every Claude Code session", font=font("segoeui.ttf", 30), fill=TEXT)
-d.text((74 * S, 382 * S), "in one small window.", font=font("segoeui.ttf", 30), fill=TEXT)
-d.text((74 * S, 440 * S), "See who waits, works or is done. Hear it happen.", font=font("segoeui.ttf", 20), fill=MUTED)
-d.text((74 * S, 468 * S), "Click to jump to its terminal, or reopen a closed one.", font=font("segoeui.ttf", 20), fill=MUTED)
+icon = icon.convert("RGBA").resize((104 * S, 104 * S), Image.LANCZOS)
+img.paste(icon, (72 * S, 100 * S), icon)
+d.text((72 * S, 222 * S), "Agent Signals", font=font("segoeuib.ttf", 64), fill=TEXT)
+d.text((74 * S, 308 * S), "for Claude Code", font=font("seguisb.ttf", 44), fill=ACCENT)
+d.text((74 * S, 382 * S), "Every session in one small window.", font=font("segoeui.ttf", 28), fill=TEXT)
+d.text((74 * S, 436 * S), "See who waits, works or is done. Hear it happen.", font=font("segoeui.ttf", 20), fill=MUTED)
+d.text((74 * S, 464 * S), "Click to jump to its terminal, or reopen a closed one.", font=font("segoeui.ttf", 20), fill=MUTED)
 
 # Status legend.
 x = 76

@@ -1,4 +1,7 @@
-<img src="docs/banner.png" alt="Agent Signals: every Claude Code session in one small window">
+<img src="docs/banner.png" alt="Agent Signals for Claude Code: every session in one small window">
+
+**Agent Signals for Claude Code**: a small Windows app that shows all your Claude Code sessions in
+one window and tells you when one finishes or needs you.
 
 If you have dozens of terminals open, each with a Claude Code agent at work, you know the problem:
 which one is done, which one is waiting for your answer, and which one is still busy? Agent Signals
