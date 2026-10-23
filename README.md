@@ -55,7 +55,7 @@ with the one that finished last on top, then closed with the one closed last on 
 - **Click** a row: its Windows Terminal tab comes to the front. Click a closed (gray) row and it
   opens again in a new Windows Terminal tab, with its conversation.
 - **Right-click** a row (or the Menu key):
-  - **Copy name**: the session's name, to paste into a message to it or to another agent.
+  - **📋 Copy name**: the session's name, to paste into a message to it or to another agent.
   - **🔊 Announce when finished**: the app says "<name> finished" every time it finishes.
   - **🔔 Play a sound when finished**: a short sound (Windows' tada).
   - **💬 Notify when finished**: a Windows notification "<name> finished". Click it and the
@@ -63,12 +63,12 @@ with the one that finished last on top, then closed with the one closed last on 
   - **⚡ Flash taskbar when finished**: the session's terminal window flashes on the taskbar until
     you switch to it. Taskbar buttons are usually grouped, so the Windows Terminal button flashes:
     hover it to see which window. Outside Windows Terminal, Agent Signals' own button flashes.
-  - **Close session**: closes its terminal tab after you confirm. Claude ends there; the session
+  - **❌ Close session**: closes its terminal tab after you confirm. Claude ends there; the session
     stays in the list, gray, and a click reopens it.
 
   Each signal item turns into "Stop ..." once it is on; choose it again to turn it off.
 
-  On a closed session the menu has **Copy name**, **Reopen** and **Remove** (takes it off the list;
+  On a closed session the menu has **📋 Copy name**, **🔄 Reopen** and **🗑 Remove** (takes it off the list;
   the conversation itself stays, `claude --resume` still finds it).
 
 **Closed sessions** stay in the list when you close their terminal, until you remove them. Only

@@ -207,7 +207,7 @@ fn menu_overlay() -> Build<SkiaLayout> {
                     }),
                 SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(0x3B4256)),
                 SkiaStack::new().observe(|me, app: &App| me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.closed.is_none() && !m.confirm))).children((
-                    menu_item("Copy name", |app, cx| {
+                    menu_item("📋", "Copy name", |app, cx| {
                         if let Some(m) = app.menu.take() {
                             cx.set_clipboard(m.name);
                         }
@@ -216,7 +216,7 @@ fn menu_overlay() -> Build<SkiaLayout> {
                     signal_item(Signal::Sound),
                     signal_item(Signal::Toast),
                     signal_item(Signal::Flash),
-                    menu_item("Close session", |app, _cx| {
+                    menu_item("❌", "Close session", |app, _cx| {
                         if let Some(m) = &mut app.menu {
                             m.confirm = true;
                         }
@@ -224,17 +224,17 @@ fn menu_overlay() -> Build<SkiaLayout> {
                 )),
                 // A closed session.
                 SkiaStack::new().observe(|me, app: &App| me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.closed.is_some()))).children((
-                    menu_item("Copy name", |app, cx| {
+                    menu_item("📋", "Copy name", |app, cx| {
                         if let Some(m) = app.menu.take() {
                             cx.set_clipboard(m.name);
                         }
                     }),
-                    menu_item("Reopen", |app, _cx| {
+                    menu_item("🔄", "Reopen", |app, _cx| {
                         if let Some(id) = app.menu.take().and_then(|m| m.closed) {
                             let _ = app.tx.send(Cmd::ReopenOne(id));
                         }
                     }),
-                    menu_item("Remove", |app, _cx| {
+                    menu_item("🗑", "Remove", |app, _cx| {
                         if let Some(id) = app.menu.take().and_then(|m| m.closed) {
                             let _ = app.tx.send(Cmd::Forget(id));
                         }
@@ -288,7 +288,8 @@ fn signal_item(signal: Signal) -> Build<SkiaShape> {
         }),))
 }
 
-fn menu_item(text: &str, action: fn(&mut App, &mut Cx)) -> Build<SkiaShape> {
+/// Every menu item shows an icon before its text; screen readers get the text alone.
+fn menu_item(icon: &str, text: &str, action: fn(&mut App, &mut Cx)) -> Build<SkiaShape> {
     SkiaShape::new()
         .corner_radius(6)
         .fill_x()
@@ -298,7 +299,7 @@ fn menu_item(text: &str, action: fn(&mut App, &mut Cx)) -> Build<SkiaShape> {
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .on_hovered(hover_item)
         .on_tapped(move |_me, app: &mut App, cx| action(app, cx))
-        .children((label(text, 14),))
+        .children((label(&format!("{icon} {text}"), 14),))
 }
 
 /// A menu item under the mouse takes the panel's border color.
