@@ -209,7 +209,7 @@ Localhost only, no authentication: any local process can make it beep.
 - Reads `%USERPROFILE%\.claude\sessions\*.json` (Claude Code's list of live sessions) and, from
   each session's transcript, its first lines (start folder), its last lines (permission mode) and,
   for a session without a name of its own, its title.
-- Writes `%APPDATA%\AgentSignals\rules.json`, `sessions.json` (the open terminal sessions; a
+- Writes `%APPDATA%\AgentSignals\rules.json`, `sessions.json` (the terminal sessions;
   closed ones stay until you remove them) and, after a crash, `crash.log`; registers the toast AUMID under
   `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
 - Starts `wt` (Windows Terminal) only when you reopen sessions.
