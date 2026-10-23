@@ -118,6 +118,8 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 
 Windows 10 or 11 with Claude Code installed (any installer: native or npm). Selecting, closing and
 reopening terminal tabs needs Windows Terminal; the list and the signals work with any terminal.
+On macOS the same, with Terminal.app in that part: see [macOS](#macos) for its folders and the two
+permissions it asks for.
 
 ## Download
 
@@ -154,7 +156,7 @@ info**, then **Run anyway**. Prefer to build it yourself? Read on.
 ### Code layout
 
 Everything that differs per operating system is in `src/platform/`, one file per system
-(`windows.rs` today); `src/platform/mod.rs` lists what each one provides. The window, the session
+(`windows.rs`, `macos.rs`); `src/platform/mod.rs` lists what each one provides. The window, the session
 list, rules, signals logic, the API and the session memory are shared and never call the system
 directly.
 
@@ -167,6 +169,46 @@ right away. From the repository folder:
 $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Agent Signals.lnk")
 $lnk.TargetPath = "$PWD\target\release\agentsignals.exe"; $lnk.WorkingDirectory = "$PWD\target\release"; $lnk.Save()
 ```
+
+## macOS
+
+Claude Code installed (native installer or Homebrew) and Terminal.app. The session list and the
+signals work with any terminal; selecting, closing and reopening tabs is Terminal.app only.
+
+Build and run it the same way:
+
+```sh
+cargo build --release
+./target/release/agentsignals
+```
+
+Two permissions are asked for the first time they are needed, both under **System Settings >
+Privacy & Security**:
+
+- **Automation > Terminal** — for clicking a row (focus its tab), Close session, and reopening a
+  session. Refused, those say so under Recent instead of failing quietly; the list and every signal
+  keep working. You can grant it later.
+- **Notifications** — for the `toast` signal. It is posted by the system's own script tool, so it
+  appears under that tool's name in Notification Centre.
+
+What differs from Windows:
+
+- **Sounds** come from `/System/Library/Sounds` and `~/Library/Sounds` (`.aiff`, `.wav`); the
+  finished sound is `Glass`. Sounds and speech share one queue, so two signals at once are heard
+  one after the other, as they are on Windows.
+- **Flash** always bounces Agent Signals' own Dock icon, never the terminal's: one application
+  cannot make another's icon jump. Recent says `flash app` for it.
+- **A click on a notification** only dismisses it. A program without an application bundle cannot
+  be called back by Notification Centre, so the notification cannot focus the session the way it
+  does on Windows. Clicking the session's row in the window still does.
+- **Reopening a session** opens a Terminal **window** of its own, not a tab beside the others:
+  putting a tab in a chosen window needs keystroke injection (Accessibility permission), and aimed
+  at the wrong window it would open a tab in one of yours.
+- **Close session** ends the session's shell, which ends Claude Code in it, and then closes its
+  window. Terminal.app's scripting cannot close a single tab, so a session sharing a window with
+  other tabs leaves its tab behind, emptied.
+- Files live in `~/Library/Application Support/AgentSignals`, and the sessions are read from
+  `~/.claude/sessions/<pid>.json`.
 
 ## Set up with Claude
 

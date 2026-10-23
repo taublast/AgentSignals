@@ -22,7 +22,7 @@ pub struct Saved {
     pub cwd: String,
     /// The `--permission-mode` it last ran with; empty for the default.
     pub mode: String,
-    /// Its Windows Terminal window (tabs of one window share the number) and tab position.
+    /// Its terminal window (tabs of one window share the number) and tab position.
     pub window: u32,
     pub tab: u32,
     /// Epoch ms it closed while the app was running; 0 = open when the app last saw it, also when
@@ -233,9 +233,15 @@ fn claude_command(s: &Saved, claude: &str) -> Vec<String> {
 /// the app carries its markers, and a session that inherits them runs as that session's child (no
 /// transcript saving).
 pub fn without_claude_markers(command: &mut std::process::Command) {
-    for (key, _) in std::env::vars().filter(|(k, _)| k.starts_with("CLAUDE")) {
+    for key in claude_markers() {
         command.env_remove(key);
     }
+}
+
+/// The names of this process's `CLAUDE*` variables. A platform that starts the session through a
+/// terminal of its own, not as a child of this process, drops them in the command line instead.
+pub fn claude_markers() -> Vec<String> {
+    std::env::vars().map(|(k, _)| k).filter(|k| k.starts_with("CLAUDE")).collect()
 }
 
 /// Reopens the sessions in their windows and tab order, a few seconds apart, on a thread of its own;

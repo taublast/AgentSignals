@@ -23,6 +23,14 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+# macOS: Dock icon attention, window raise / floating level, main-thread hops, process liveness.
+# Sounds, voice, notifications and Terminal tabs go through the system's own programs.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSResponder"] }
+dispatch2 = "0.3"
+libc = "0.2"
+
 [build-dependencies]
 embed-resource = "3"
 
