@@ -33,8 +33,9 @@ try {
 
     $other = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 47801); $other.Start()
     try {
-        $blocked = Start-Process $Exe -WorkingDirectory $fresh -PassThru; Start-Sleep 7
-        $box = !$blocked.HasExited -and (ClassOf $blocked) -eq '#32770'
+        # Watched for, not expected to stay: the box takes the keyboard, and a key pressed meanwhile closes it.
+        $blocked = Start-Process $Exe -WorkingDirectory $fresh -PassThru; $box = $false
+        foreach ($i in 1..40) { Start-Sleep -Milliseconds 250; if (!$blocked.HasExited -and (ClassOf $blocked) -eq '#32770') { $box = $true; break } }
         Check $box 'port taken by another program: error message shown'
         if (!$blocked.HasExited) { Stop-Process -Id $blocked.Id -Force }
     } finally { $other.Stop() }

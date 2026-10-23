@@ -3,8 +3,8 @@
 
 mod http;
 mod restore;
+mod platform;
 mod state;
-mod win;
 mod worker;
 
 use drawnui::prelude::*;
@@ -19,7 +19,7 @@ const TICK_MS: f32 = 1000.0;
 /// Blue of the switches when on.
 const ACCENT: u32 = 0x3B82F6;
 const MENU_WIDTH: f32 = 260.0;
-/// The window title; `win::own_window` finds the window by it.
+/// The window title; the Windows side finds the app's window by it.
 pub(crate) const TITLE: &str = "Agent Signals";
 
 fn hex(rgb: u32) -> Color {
@@ -398,7 +398,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
         ))
 }
 
-/// A terminal session that is not running: gray, a click reopens it in Windows Terminal.
+/// A terminal session that is not running: gray, a click reopens it in a terminal tab.
 fn closed_row(id: String, name: String) -> Build<SkiaShape> {
     let (reopen, menu, folder) = (id.clone(), id.clone(), id.clone());
     SkiaShape::new()
@@ -515,7 +515,7 @@ pub fn run() {
         // Already running: wave from the running one instead. Another program on the port: say so,
         // never quit without a word.
         if !http::poke_running() {
-            win::error_box(&format!(
+            platform::error_box(&format!(
                 "Agent Signals cannot start: another program uses port {}, which the app needs for its API. Close that program and start Agent Signals again.",
                 http::PORT
             ));
@@ -540,7 +540,7 @@ pub fn run() {
             notes: HashMap::new(),
             muted: false,
             reopen: Vec::new(),
-            home: std::env::var("USERPROFILE").unwrap_or_default(),
+            home: platform::home_dir().to_string_lossy().into_owned(),
             session_key: (Vec::new(), Vec::new()),
             inactive: Vec::new(),
             root: Handle::default(),

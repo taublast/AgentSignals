@@ -151,6 +151,13 @@ info**, then **Run anyway**. Prefer to build it yourself? Read on.
    message must show), then runs the unit tests and a live Windows Terminal test that opens one tab
    and closes it.
 
+### Code layout
+
+Everything that differs per operating system is in `src/platform/`, one file per system
+(`windows.rs` today); `src/platform/mod.rs` lists what each one provides. The window, the session
+list, rules, signals logic, the API and the session memory are shared and never call the system
+directly.
+
 ### Start with Windows (optional)
 
 The app then starts when you sign in, so after a reboot it offers your sessions from last time

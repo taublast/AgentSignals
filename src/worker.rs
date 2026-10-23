@@ -4,7 +4,7 @@
 
 use crate::restore::{self, Memory};
 use crate::state::{self, Action, Event, Session, Shared};
-use crate::win::{self, Signals};
+use crate::platform::{self, Signals};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -15,7 +15,7 @@ pub enum Cmd {
     /// Run a signal now; the name fills `{name}` and the toast title.
     Signal(Action, String),
     Focus(String),
-    /// Close the session's Windows Terminal tab (confirmed in the UI).
+    /// Close the session's terminal tab (confirmed in the UI).
     CloseTab(String),
     Topmost(bool),
     /// Reopen the sessions a reboot closed (`State::reopen`).
@@ -40,7 +40,7 @@ pub fn start(shared: Shared) -> Sender<Cmd> {
 }
 
 fn sessions_dir() -> PathBuf {
-    PathBuf::from(std::env::var("USERPROFILE").unwrap_or_default()).join(".claude").join("sessions")
+    platform::home_dir().join(".claude").join("sessions")
 }
 
 fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
@@ -215,24 +215,20 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<
         }
         Cmd::Focus(name) => tab_command(signals, shared, name, "focus", Signals::focus_tab),
         Cmd::CloseTab(name) => tab_command(signals, shared, name, "close", Signals::close_tab),
-        Cmd::Topmost(on) => {
-            if let Some(hwnd) = win::own_window() {
-                win::set_topmost(hwnd, on);
-            }
-        }
+        Cmd::Topmost(on) => platform::set_topmost(on),
     }
 }
 
 /// Runs a terminal tab command for a session and logs how it went. The tab shows the session's
 /// title: a session without a name of its own is titled after its custom or AI title, not its
 /// registry name (dev-3f).
-fn tab_command(signals: &Signals, shared: &Shared, name: String, kind: &str, run: fn(&Signals, &str) -> windows::core::Result<bool>) {
+fn tab_command(signals: &Signals, shared: &Shared, name: String, kind: &str, run: fn(&Signals, &str) -> Result<bool, String>) {
     let title = shared.lock().unwrap().sessions.iter().find(|s| s.name.eq_ignore_ascii_case(&name)).map(|s| s.title.clone());
     let tab = title.filter(|t| !t.is_empty()).unwrap_or_else(|| name.clone());
     let fired = match run(signals, &tab) {
         Ok(true) => "done".into(),
         Ok(false) => "no terminal tab with that title".into(),
-        Err(e) => format!("failed: {}", e.message()),
+        Err(e) => format!("failed: {e}"),
     };
     shared.lock().unwrap().log(Event { at_ms: state::now_ms(), pid: 0, session: name, kind: kind.into(), busy_ms: 0, fired });
 }
@@ -246,14 +242,14 @@ fn tab_title(s: &Session) -> String {
 /// Runs an action for a session whose terminal tab is titled `tab` ("" for none).
 fn execute(signals: &Signals, tx: &Sender<Cmd>, a: &Action, name: &str, waiting: &str, tab: &str) -> String {
     let mut done = Vec::new();
-    let mut report = |what: &str, r: windows::core::Result<()>| match r {
+    let mut report = |what: &str, r: Result<(), String>| match r {
         Ok(()) => done.push(what.to_string()),
-        Err(e) => done.push(format!("{what} failed: {}", e.message())),
+        Err(e) => done.push(format!("{what} failed: {e}")),
     };
     if let Some(sound) = &a.sound {
         match find_sound(sound) {
             Some(path) => report("sound", signals.sound(&path)),
-            None => report("sound", Err(windows::core::Error::new(windows::core::HRESULT(-1), format!("{sound} not found")))),
+            None => report("sound", Err(format!("{sound} not found"))),
         }
     }
     if let Some(text) = &a.say {
@@ -274,51 +270,50 @@ fn execute(signals: &Signals, tx: &Sender<Cmd>, a: &Action, name: &str, waiting:
     }
     if a.flash {
         // The agent's terminal window; Agent Signals itself when there is none (no session, or a
-        // terminal other than Windows Terminal).
-        match (!tab.is_empty()).then(|| signals.terminal_window(tab)).flatten() {
-            Some(hwnd) => {
-                win::flash(hwnd);
-                done.push("flash terminal".into());
-            }
-            None => {
-                if let Some(hwnd) = win::own_window() {
-                    win::flash(hwnd);
-                }
-                done.push("flash app".into());
-            }
+        // terminal the app does not know).
+        if !tab.is_empty() && signals.flash_terminal(tab) {
+            done.push("flash terminal".into());
+        } else {
+            platform::flash_app();
+            done.push("flash app".into());
         }
     }
     if a.raise {
-        if let Some(hwnd) = win::own_window() {
-            win::raise(hwnd);
-        }
+        platform::raise_app();
         done.push("raise".into());
     }
     done.join(", ")
 }
 
-/// A full path, or a name (".wav" optional) in %APPDATA%\AgentSignals\sounds, then C:\Windows\Media.
+/// Where sounds are looked up: the app's sounds folder, then the system sounds.
+fn sound_dirs() -> Vec<PathBuf> {
+    std::iter::once(state::data_dir().join("sounds")).chain(platform::sound_dirs()).collect()
+}
+
+fn is_sound(path: &std::path::Path) -> bool {
+    path.extension().is_some_and(|x| platform::SOUND_EXTENSIONS.iter().any(|e| x.eq_ignore_ascii_case(e)))
+}
+
+/// A full path, or a name (extension optional) in the app's sounds folder, then the system sounds.
 pub fn find_sound(sound: &str) -> Option<PathBuf> {
     let direct = PathBuf::from(sound);
     if direct.is_absolute() {
         return direct.is_file().then_some(direct);
     }
-    let file = if sound.to_lowercase().ends_with(".wav") { sound.to_string() } else { format!("{sound}.wav") };
-    let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
-    [state::data_dir().join("sounds"), PathBuf::from(windir).join("Media")].into_iter().map(|d| d.join(&file)).find(|p| p.is_file())
+    let files: Vec<String> = if is_sound(&direct) { vec![sound.into()] } else { platform::SOUND_EXTENSIONS.iter().map(|e| format!("{sound}.{e}")).collect() };
+    sound_dirs().into_iter().flat_map(|d| files.iter().map(move |f| d.join(f))).find(|p| p.is_file())
 }
 
-/// Every .wav name the app can play.
+/// Every sound name the app can play.
 pub fn sound_names() -> Vec<String> {
-    let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
-    let mut names: Vec<String> = [state::data_dir().join("sounds"), PathBuf::from(windir).join("Media")]
+    let mut names: Vec<String> = sound_dirs()
         .iter()
         .filter_map(|d| std::fs::read_dir(d).ok())
         .flatten()
         .flatten()
         .filter_map(|e| {
             let p = e.path();
-            p.extension().is_some_and(|x| x.eq_ignore_ascii_case("wav")).then(|| p.file_stem().unwrap().to_string_lossy().into_owned())
+            is_sound(&p).then(|| p.file_stem().unwrap().to_string_lossy().into_owned())
         })
         .collect();
     names.sort_by_key(|n| n.to_lowercase());
@@ -346,7 +341,7 @@ fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Option<Session>
                 s
             }
         };
-        if let Some(s) = parsed.filter(|s| win::pid_alive(s.pid)) {
+        if let Some(s) = parsed.filter(|s| platform::pid_alive(s.pid)) {
             seen.insert(s.pid, s);
         }
     }
@@ -395,7 +390,7 @@ fn transcript_title(cwd: &str, session_id: &str) -> String {
         return String::new();
     }
     let slug: String = cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
-    let path = PathBuf::from(std::env::var("USERPROFILE").unwrap_or_default())
+    let path = platform::home_dir()
         .join(".claude")
         .join("projects")
         .join(slug)

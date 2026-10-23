@@ -33,13 +33,13 @@ pub struct Session {
 /// What a signal does. Text fields take `{name}` and `{waiting}`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Action {
-    /// A .wav: a name in %APPDATA%\AgentSignals\sounds or C:\Windows\Media, or a full path.
+    /// A sound file: a name in the app's sounds folder or the system sounds, or a full path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sound: Option<String>,
-    /// Text the Windows voice speaks.
+    /// Text the system voice speaks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub say: Option<String>,
-    /// Text of a Windows toast.
+    /// Text of a system notification.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub toast: Option<String>,
     /// Toast title (default: the session name, or "Agent Signals").
@@ -170,13 +170,18 @@ impl State {
     }
 }
 
-/// %APPDATA%\AgentSignals
+/// The app's own folder: AgentSignals in the per-user app data folder (%APPDATA% on Windows).
 pub fn data_dir() -> PathBuf {
-    PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("AgentSignals")
+    crate::platform::data_dir().join("AgentSignals")
 }
 
 fn rules_path() -> PathBuf {
     data_dir().join("rules.json")
+}
+
+/// A terminal tab title is `<marker> <session name>` (`✳ idle`, `◐ busy`...).
+pub fn tab_is(title: &str, name: &str) -> bool {
+    title.trim_start_matches(|c: char| !c.is_alphanumeric()).trim().eq_ignore_ascii_case(name)
 }
 
 pub fn now_ms() -> u64 {
@@ -234,7 +239,7 @@ impl Signal {
     fn set(self, a: &mut Action, on: bool) {
         match self {
             Signal::Say => a.say = on.then(|| "{name} finished".into()),
-            Signal::Sound => a.sound = on.then(|| "tada".into()),
+            Signal::Sound => a.sound = on.then(|| crate::platform::FINISHED_SOUND.into()),
             Signal::Toast => a.toast = on.then(|| "{name} finished".into()),
             Signal::Flash => a.flash = on,
         }
@@ -337,6 +342,14 @@ mod tests {
 
     fn map(list: &[Session]) -> HashMap<u32, Session> {
         list.iter().map(|s| (s.pid, s.clone())).collect()
+    }
+
+    #[test]
+    fn tab_titles() {
+        assert!(tab_is("✳ api-server", "api-server"));
+        assert!(tab_is("◑ docs-writer", "docs-writer"));
+        assert!(tab_is("✳ Fix login redirect loop", "Fix login redirect loop"));
+        assert!(!tab_is("✳ api-server", "api-serve"));
     }
 
     #[test]

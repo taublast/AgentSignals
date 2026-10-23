@@ -1,8 +1,9 @@
-//! Windows side: voice and sounds (SAPI), toasts, taskbar flash, window raise / topmost,
-//! Windows Terminal tab focus (UI Automation), process liveness.
+//! Windows: voice and sounds (SAPI), toasts, taskbar flash, window raise / topmost, Windows
+//! Terminal tabs (UI Automation; opened with `wt`), process liveness, folders.
 
+use crate::state::tab_is;
 use std::cell::RefCell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use windows::Data::Xml::Dom::XmlDocument;
 use windows::Foundation::TypedEventHandler;
 use windows::UI::Notifications::{ToastNotification, ToastNotificationManager, ToastNotifier};
@@ -20,10 +21,56 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, MB_ICONERROR, MB_OK, MessageBoxW, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE,
     SWP_NOSIZE, SetForegroundWindow, SetWindowPos, ShowWindow,
 };
-use windows::core::{BOOL, HSTRING, Result, w};
+use windows::core::{BOOL, HSTRING, w};
+
+type Result<T> = std::result::Result<T, String>;
 
 const AUMID: &str = "AgentSignals";
 const TERMINAL_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
+
+pub const SOUND_EXTENSIONS: &[&str] = &["wav"];
+pub const FINISHED_SOUND: &str = "tada";
+/// Windows Terminal finds a bare `claude` only as an .exe, so npm's `claude.cmd` is started by its
+/// full path.
+pub const CLAUDE_PROGRAMS: &[&str] = &["claude.exe", "claude.cmd", "claude.bat"];
+
+fn env_dir(key: &str) -> PathBuf {
+    PathBuf::from(std::env::var(key).unwrap_or_default())
+}
+
+pub fn home_dir() -> PathBuf {
+    env_dir("USERPROFILE")
+}
+
+pub fn data_dir() -> PathBuf {
+    std::env::var("APPDATA").map_or_else(|_| PathBuf::from("."), PathBuf::from)
+}
+
+pub fn sound_dirs() -> Vec<PathBuf> {
+    vec![PathBuf::from(std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into())).join("Media")]
+}
+
+/// The native installer's folder and npm's.
+pub fn claude_dirs() -> Vec<PathBuf> {
+    vec![home_dir().join(".local").join("bin"), env_dir("APPDATA").join("npm")]
+}
+
+/// Windows Terminal's arguments for a new tab in `window` and `cwd` running `command`. `;`
+/// separates Windows Terminal commands, so one in a name or folder is escaped.
+fn wt_args(cwd: &str, command: &[String], window: &str) -> Vec<String> {
+    ["-w", window, "nt", "-d", cwd].iter().map(|a| a.to_string()).chain(command.iter().cloned()).map(|a| a.replace(';', "\\;")).collect()
+}
+
+pub fn open_session(cwd: &str, command: &[String], group: Option<&str>) -> Result<()> {
+    let mut wt = std::process::Command::new("wt");
+    wt.args(wt_args(cwd, command, group.unwrap_or("0")));
+    crate::restore::without_claude_markers(&mut wt);
+    wt.spawn().map(|_| ()).map_err(|e| format!("Windows Terminal (wt) could not start: {e}"))
+}
+
+fn msg(e: windows::core::Error) -> String {
+    e.message().to_string()
+}
 
 /// The COM objects, made once on the worker thread.
 pub struct Signals {
@@ -55,33 +102,35 @@ impl Signals {
 
     /// Queued on the voice after what it is already saying: signals never overlap.
     pub fn sound(&self, wav: &Path) -> Result<()> {
-        let voice = self.voice.as_ref().ok_or_else(no_voice)?;
-        unsafe { voice.Speak(&HSTRING::from(wav), (SPF_ASYNC.0 | SPF_IS_FILENAME.0) as u32, None) }
+        let voice = self.voice.as_ref().ok_or("no SAPI voice")?;
+        unsafe { voice.Speak(&HSTRING::from(wav), (SPF_ASYNC.0 | SPF_IS_FILENAME.0) as u32, None) }.map_err(msg)
     }
 
     pub fn say(&self, text: &str) -> Result<()> {
-        let voice = self.voice.as_ref().ok_or_else(no_voice)?;
-        unsafe { voice.Speak(&HSTRING::from(text), (SPF_ASYNC.0 | SPF_IS_NOT_XML.0) as u32, None) }
+        let voice = self.voice.as_ref().ok_or("no SAPI voice")?;
+        unsafe { voice.Speak(&HSTRING::from(text), (SPF_ASYNC.0 | SPF_IS_NOT_XML.0) as u32, None) }.map_err(msg)
     }
 
     /// Shows a toast; `on_click` runs (on a thread pool thread) when the user clicks it.
     pub fn toast(&self, title: &str, text: &str, on_click: Option<Box<dyn Fn() + Send>>) -> Result<()> {
-        let notifier = self.notifier.as_ref().ok_or_else(|| windows::core::Error::new(windows::core::HRESULT(-1), "no toast notifier"))?;
+        let notifier = self.notifier.as_ref().ok_or("no toast notifier")?;
         let xml = format!(
             "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",
             escape(title),
             escape(text)
         );
-        let doc = XmlDocument::new()?;
-        doc.LoadXml(&HSTRING::from(xml))?;
-        let toast = ToastNotification::CreateToastNotification(&doc)?;
+        let doc = XmlDocument::new().map_err(msg)?;
+        doc.LoadXml(&HSTRING::from(xml)).map_err(msg)?;
+        let toast = ToastNotification::CreateToastNotification(&doc).map_err(msg)?;
         if let Some(on_click) = on_click {
-            toast.Activated(&TypedEventHandler::new(move |_, _| {
-                on_click();
-                Ok(())
-            }))?;
+            toast
+                .Activated(&TypedEventHandler::new(move |_, _| {
+                    on_click();
+                    Ok(())
+                }))
+                .map_err(msg)?;
         }
-        notifier.Show(&toast)?;
+        notifier.Show(&toast).map_err(msg)?;
         // A click reaches the handler only while the toast object lives, in the popup and in the
         // notification center alike.
         // ponytail: the last 50 toasts stay clickable; older ones in the notification center do nothing.
@@ -96,8 +145,8 @@ impl Signals {
     /// Selects the Windows Terminal tab titled after the session and brings its window to the
     /// front. False when no tab has that title.
     pub fn focus_tab(&self, name: &str) -> Result<bool> {
-        let Some((hwnd, tab)) = self.find_tab(name)? else { return Ok(false) };
-        unsafe { tab.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId)?.Select()? };
+        let Some((hwnd, tab)) = self.find_tab(name).map_err(msg)? else { return Ok(false) };
+        unsafe { tab.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId).and_then(|p| p.Select()) }.map_err(msg)?;
         raise(hwnd);
         Ok(true)
     }
@@ -105,6 +154,10 @@ impl Signals {
     /// Presses the tab's close button: the shell and the Claude session in it end, the tab
     /// goes away. False when no tab has that title.
     pub fn close_tab(&self, name: &str) -> Result<bool> {
+        self.close_tab_inner(name).map_err(msg)
+    }
+
+    fn close_tab_inner(&self, name: &str) -> windows::core::Result<bool> {
         let Some((_, tab)) = self.find_tab(name)? else { return Ok(false) };
         unsafe {
             let uia = self.uia.as_ref().unwrap();
@@ -120,9 +173,13 @@ impl Signals {
         Ok(false)
     }
 
-    /// The Windows Terminal window holding the tab titled `name`.
-    pub fn terminal_window(&self, name: &str) -> Option<HWND> {
-        self.find_tab(name).ok().flatten().map(|(hwnd, _)| hwnd)
+    /// Flashes the Windows Terminal window holding the tab titled `name` on the taskbar.
+    pub fn flash_terminal(&self, name: &str) -> bool {
+        let found = self.find_tab(name).ok().flatten();
+        if let Some((hwnd, _)) = &found {
+            flash(*hwnd);
+        }
+        found.is_some()
     }
 
     /// Every Windows Terminal tab: (window number, tab position, title). Tabs of one window share
@@ -150,7 +207,7 @@ impl Signals {
     }
 
     /// The Windows Terminal tab whose title, minus its status marker, is `name`, and its window.
-    fn find_tab(&self, name: &str) -> Result<Option<(HWND, IUIAutomationElement)>> {
+    fn find_tab(&self, name: &str) -> windows::core::Result<Option<(HWND, IUIAutomationElement)>> {
         let uia = self.uia.as_ref().ok_or_else(|| windows::core::Error::new(windows::core::HRESULT(-1), "no UI Automation"))?;
         unsafe {
             let any = uia.CreateTrueCondition()?;
@@ -168,17 +225,8 @@ impl Signals {
     }
 }
 
-fn no_voice() -> windows::core::Error {
-    windows::core::Error::new(windows::core::HRESULT(-1), "no SAPI voice")
-}
-
 fn escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
-}
-
-/// A Windows Terminal tab title is `<marker> <session name>` (`✳ idle`, `◐ busy`...).
-pub fn tab_is(title: &str, name: &str) -> bool {
-    title.trim_start_matches(|c: char| !c.is_alphanumeric()).trim().eq_ignore_ascii_case(name)
 }
 
 /// The visible top-level windows of a class.
@@ -202,7 +250,7 @@ fn windows_of_class(class: &str) -> Vec<HWND> {
 /// This app's main window (the engine does not hand it out).
 /// Found by its title: winit also keeps a visible, unowned helper window ("Winit Thread Event
 /// Target") in the process, which "the first visible window" could pick instead.
-pub fn own_window() -> Option<HWND> {
+fn own_window() -> Option<HWND> {
     let mut found: Option<HWND> = None;
     unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let found = unsafe { &mut *(lparam.0 as *mut Option<HWND>) };
@@ -225,8 +273,22 @@ pub fn own_window() -> Option<HWND> {
     found
 }
 
+/// Flashes this app's taskbar button.
+pub fn flash_app() {
+    if let Some(hwnd) = own_window() {
+        flash(hwnd);
+    }
+}
+
+/// Brings this app's window to the front.
+pub fn raise_app() {
+    if let Some(hwnd) = own_window() {
+        raise(hwnd);
+    }
+}
+
 /// Flashes the taskbar button until the window comes to the front.
-pub fn flash(hwnd: HWND) {
+fn flash(hwnd: HWND) {
     let info = FLASHWINFO {
         cbSize: size_of::<FLASHWINFO>() as u32,
         hwnd,
@@ -241,7 +303,7 @@ pub fn flash(hwnd: HWND) {
 
 /// Restores and activates a window. Windows may refuse to let a background app take the
 /// foreground; the taskbar button then flashes instead.
-pub fn raise(hwnd: HWND) {
+fn raise(hwnd: HWND) {
     unsafe {
         if IsIconic(hwnd).as_bool() {
             let _ = ShowWindow(hwnd, SW_RESTORE);
@@ -259,7 +321,9 @@ pub fn error_box(text: &str) {
     }
 }
 
-pub fn set_topmost(hwnd: HWND, on: bool) {
+/// Keeps this app's window above all others, or not.
+pub fn set_topmost(on: bool) {
+    let Some(hwnd) = own_window() else { return };
     let after = if on { HWND_TOPMOST } else { HWND_NOTOPMOST };
     unsafe {
         let _ = SetWindowPos(hwnd, Some(after), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -279,11 +343,48 @@ pub fn pid_alive(pid: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::time::Duration;
+
     #[test]
-    fn tab_titles() {
-        assert!(super::tab_is("✳ api-server", "api-server"));
-        assert!(super::tab_is("◑ docs-writer", "docs-writer"));
-        assert!(super::tab_is("✳ Fix login redirect loop", "Fix login redirect loop"));
-        assert!(!super::tab_is("✳ api-server", "api-serve"));
+    fn terminal_command() {
+        let command: Vec<String> = [r"C:\Users\me\.local\bin\claude.exe", "--resume", "abc", "-n", "api-server"].map(String::from).to_vec();
+        assert_eq!(
+            wt_args(r"C:\Work", &command, "agents-1").join(" "),
+            r"-w agents-1 nt -d C:\Work C:\Users\me\.local\bin\claude.exe --resume abc -n api-server"
+        );
+        // `;` would start a second Windows Terminal command.
+        let odd = wt_args(r"C:\x;y", &["claude".into(), "-n".into(), "a; b".into()], "0");
+        assert!(odd.contains(&r"C:\x\;y".to_string()) && odd.contains(&r"a\; b".to_string()));
+    }
+
+    /// Opens a real Windows Terminal tab with a stand-in for claude that writes down how it was
+    /// started: one tab, the right folder, the name in one piece. Run by hand:
+    /// `cargo test --release -- --ignored windows_terminal`.
+    #[test]
+    #[ignore]
+    fn windows_terminal_starts_the_session() {
+        let root = std::env::temp_dir().join(format!("agentsignals-test-{}-wt", std::process::id()));
+        let (bin, folder, log) = (root.join("fake bin"), root.join("my work; folder"), root.join("log.txt"));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&folder).unwrap();
+        // Like npm's claude.cmd; logs its arguments and folder, then the tab closes by itself.
+        std::fs::write(bin.join("claude.cmd"), format!("@echo ARGS=[%*] CWD=[%CD%]>> \"{}\"\r\n", log.display())).unwrap();
+        let command: Vec<String> = [bin.join("claude.cmd").to_string_lossy().into_owned(), "--resume".into(), "abc".into(), "-n".into(), "my name; two".into()].to_vec();
+        open_session(&folder.to_string_lossy(), &command, Some("agents-signals-test")).unwrap();
+        let mut text = String::new();
+        for _ in 0..50 {
+            std::thread::sleep(Duration::from_millis(200));
+            text = std::fs::read_to_string(&log).unwrap_or_default();
+            if !text.is_empty() {
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_secs(1));
+        let text = std::fs::read_to_string(&log).unwrap_or(text);
+        assert_eq!(text.lines().count(), 1, "one tab started: {text}");
+        assert!(text.contains("--resume abc -n \"my name; two\""), "{text}");
+        assert!(text.contains(&format!("CWD=[{}]", folder.display())), "{text}");
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -18,10 +18,10 @@ POST   /rules           {session: name or \"*\", on: finished|waiting|started|cl
 DELETE /rules/<id>      remove a rule
 POST   /signal          {sound?, say?, toast?, title?, flash?, raise?, session?}  signal now
 POST   /note            {session, text}  a line shown under the session (empty text clears)
-POST   /focus           {session}  select its Windows Terminal tab
+POST   /focus           {session}  select its terminal tab
 GET    /events          last 50 status changes and what fired
-GET    /sounds          playable .wav names
-Text fields take {name} and {waiting}. Sounds: a name from GET /sounds or a full .wav path.
+GET    /sounds          playable sound names
+Text fields take {name} and {waiting}. Sounds: a name from GET /sounds or a full path to a sound file.
 ";
 
 /// The API port; `None` when another instance has it.
