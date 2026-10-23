@@ -77,30 +77,31 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
         let events = if first { Vec::new() } else { state::diff(&live, &new, now) };
         let changed = new != live;
         live = new;
+        if changed || !events.is_empty() {
+            let mut st = shared.lock().unwrap();
+            let mut sessions: Vec<Session> = live.values().cloned().collect();
+            state::sort_sessions(&mut sessions);
+            st.sessions = sessions;
+            st.version += 1;
+            for mut event in events {
+                let waiting = live.get(&event.pid).map_or(String::new(), |s| s.waiting_for.clone());
+                let tab = live.get(&event.pid).map_or(String::new(), tab_title);
+                let rules: Vec<_> = st.rules.iter().filter(|r| r.matches(&event.session, &event)).cloned().collect();
+                let mut fired = Vec::new();
+                for rule in &rules {
+                    fired.push(if st.muted { "muted".into() } else { execute(&signals, &tx, &rule.action, &event.session, &waiting, &tab) });
+                    if rule.once {
+                        st.remove_rule(rule.id);
+                    }
+                }
+                event.fired = fired.join("; ");
+                st.log(event);
+            }
+        }
+        // After the list is out: reading the terminals' tab layout can be slow (a permission
+        // prompt on macOS), and the window must not wait for it.
         remember(&signals, &shared, &mut memory, &live, first, &mut layout_ids, &mut layout_at);
         first = false;
-        if !changed && events.is_empty() {
-            continue;
-        }
-        let mut st = shared.lock().unwrap();
-        let mut sessions: Vec<Session> = live.values().cloned().collect();
-        state::sort_sessions(&mut sessions);
-        st.sessions = sessions;
-        st.version += 1;
-        for mut event in events {
-            let waiting = live.get(&event.pid).map_or(String::new(), |s| s.waiting_for.clone());
-            let tab = live.get(&event.pid).map_or(String::new(), tab_title);
-            let rules: Vec<_> = st.rules.iter().filter(|r| r.matches(&event.session, &event)).cloned().collect();
-            let mut fired = Vec::new();
-            for rule in &rules {
-                fired.push(if st.muted { "muted".into() } else { execute(&signals, &tx, &rule.action, &event.session, &waiting, &tab) });
-                if rule.once {
-                    st.remove_rule(rule.id);
-                }
-            }
-            event.fired = fired.join("; ");
-            st.log(event);
-        }
     }
 }
 
