@@ -45,8 +45,14 @@ pub fn claude_dirs() -> Vec<PathBuf> {
 
 // ---------------------------------------------------------------- AppleScript
 
+/// How long a script is given to answer. The worker thread asks for the tab layout on its way
+/// round, so a script that never returns would stop the session list being filled in at all:
+/// osascript waits indefinitely for a permission prompt, and a prompt cannot be answered while
+/// the screen is locked.
+const PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Runs a script through `osascript`, the script on stdin: `-e` and script files are read as
-/// MacRoman on some systems, which mangles the markers in tab titles.
+/// MacRoman on some systems, which mangles the markers in tab titles. Gives up after `PATIENCE`.
 fn osascript(script: &str) -> Result<String> {
     let mut osa = Command::new("osascript");
     // No script of ours carries this process's Claude markers into what it starts.
@@ -58,11 +64,34 @@ fn osascript(script: &str) -> Result<String> {
         .spawn()
         .map_err(|e| format!("osascript could not start: {e}"))?;
     child.stdin.take().ok_or("osascript has no stdin")?.write_all(script.as_bytes()).map_err(|e| format!("osascript: {e}"))?;
-    let out = child.wait_with_output().map_err(|e| format!("osascript: {e}"))?;
-    if out.status.success() {
-        return Ok(String::from_utf8_lossy(&out.stdout).trim_end().to_string());
+    let deadline = std::time::Instant::now() + PATIENCE;
+    let status = loop {
+        match child.try_wait().map_err(|e| format!("osascript: {e}"))? {
+            Some(status) => break status,
+            None if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Terminal did not answer in {}s; a permission prompt may be waiting", PATIENCE.as_secs()));
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(25)),
+        }
+    };
+    let read = |pipe: &mut Option<std::process::ChildStdout>| -> String {
+        let mut text = String::new();
+        if let Some(p) = pipe.as_mut() {
+            let _ = std::io::Read::read_to_string(p, &mut text);
+        }
+        text
+    };
+    let out = read(&mut child.stdout);
+    if status.success() {
+        return Ok(out.trim_end().to_string());
     }
-    Err(script_error(&String::from_utf8_lossy(&out.stderr)))
+    let mut err = String::new();
+    if let Some(p) = child.stderr.as_mut() {
+        let _ = std::io::Read::read_to_string(p, &mut err);
+    }
+    Err(script_error(&err))
 }
 
 /// An AppleScript failure as something a person can act on. A refused Automation permission is the
@@ -242,12 +271,17 @@ impl Signals {
         self.queue.send(Utterance::Say(text.to_string())).map_err(|_| "the signal thread stopped".into())
     }
 
-    /// A notification in the corner of the screen.
+    /// A notification in the corner of the screen. A click on it focuses the session's terminal
+    /// tab, as a click on its row does.
     ///
-    /// `on_click` is dropped: a notification posted by a program without an application bundle
-    /// cannot call back into it, so a click only dismisses it. The session's row in the app
-    /// focuses its tab, as it does on every system.
-    pub fn toast(&self, title: &str, text: &str, _on_click: Option<Box<dyn Fn() + Send>>) -> Result<()> {
+    /// Notification Centre only talks to an application bundle, so a bundled Agent Signals posts
+    /// through it and hears the click; run straight from `cargo`, there is no bundle and no bundle
+    /// identifier to post under, and the notification goes through AppleScript instead, where a
+    /// click can only dismiss it.
+    pub fn toast(&self, title: &str, text: &str, on_click: Option<Box<dyn Fn() + Send>>) -> Result<()> {
+        if bundled() {
+            return notify::post(title, text, on_click);
+        }
         let script = format!("display notification {} with title {}", as_string(text), as_string(title));
         osascript(&script).map(|_| ())
     }
@@ -325,6 +359,134 @@ fn end_shell(tty: &str) -> Result<()> {
         unsafe { libc::kill(pid, libc::SIGHUP) };
     }
     Ok(())
+}
+
+/// True when the program runs as an application bundle, which Notification Centre needs.
+fn bundled() -> bool {
+    objc2_foundation::NSBundle::mainBundle().bundleIdentifier().is_some()
+}
+
+/// Notification Centre: posting, and the click that comes back.
+///
+/// Each notification is posted under an identifier of its own, and what to do when it is clicked
+/// is kept here against that identifier. The delegate is what Notification Centre calls; it looks
+/// the identifier up and runs it. Without a delegate a click only opens the app, which is why the
+/// session's tab would not come forward.
+mod notify {
+    use super::Result;
+    use block2::{DynBlock, RcBlock};
+    use objc2::rc::Retained;
+    use objc2::runtime::ProtocolObject;
+    use objc2::{AllocAnyThread, MainThreadMarker, define_class, msg_send};
+    use objc2_foundation::{NSError, NSObject, NSObjectProtocol, NSString};
+    use objc2_user_notifications::{
+        UNAuthorizationOptions, UNMutableNotificationContent, UNNotification, UNNotificationPresentationOptions, UNNotificationRequest,
+        UNNotificationResponse, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
+    };
+    
+    use std::sync::{Mutex, OnceLock};
+
+    type Click = Box<dyn Fn() + Send>;
+
+    /// What to run when a notification is clicked, by its identifier. Notification Centre keeps
+    /// notifications after they are posted, so these are kept too; the oldest go first.
+    fn waiting() -> &'static Mutex<Vec<(String, Click)>> {
+        static WAITING: OnceLock<Mutex<Vec<(String, Click)>>> = OnceLock::new();
+        WAITING.get_or_init(|| Mutex::new(Vec::new()))
+    }
+
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[name = "AgentSignalsNotificationDelegate"]
+        #[ivars = ()]
+        struct Delegate;
+
+        unsafe impl NSObjectProtocol for Delegate {}
+
+        unsafe impl UNUserNotificationCenterDelegate for Delegate {
+            /// A click on the notification, in the corner or in Notification Centre.
+            #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
+            fn did_receive(&self, _center: &UNUserNotificationCenter, response: &UNNotificationResponse, done: &DynBlock<dyn Fn()>) {
+                let id = response.notification().request().identifier().to_string();
+                let found = waiting().lock().ok().and_then(|mut w| w.iter().position(|(k, _)| *k == id).map(|i| w.remove(i).1));
+                if let Some(click) = found {
+                    click();
+                }
+                done.call(());
+            }
+
+            /// Show the notification even while Agent Signals is the application in front:
+            /// without this, a signal for a session would be silent exactly when the board is
+            /// being watched.
+            #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+            fn will_present(&self, _center: &UNUserNotificationCenter, _notification: &UNNotification, done: &DynBlock<dyn Fn(UNNotificationPresentationOptions)>) {
+                done.call((UNNotificationPresentationOptions::Banner | UNNotificationPresentationOptions::Sound,));
+            }
+        }
+    );
+
+    /// The delegate, made once and kept for the life of the program.
+    fn delegate() -> &'static Mutex<Option<Retained<Delegate>>> {
+        static DELEGATE: OnceLock<Mutex<Option<Retained<Delegate>>>> = OnceLock::new();
+        DELEGATE.get_or_init(|| Mutex::new(None))
+    }
+
+    /// Asks for permission once and takes the clicks. Must run on the main thread.
+    fn start(_mtm: MainThreadMarker) {
+        let mut held = match delegate().lock() {
+            Ok(held) => held,
+            Err(_) => return,
+        };
+        if held.is_some() {
+            return;
+        }
+        let this: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(), init] };
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+        center.setDelegate(Some(ProtocolObject::from_ref(&*this)));
+        // The first time, macOS asks the user; after that this is answered from its own records.
+        let answered = RcBlock::new(|granted: objc2::runtime::Bool, error: *mut NSError| {
+            if !granted.as_bool() {
+                let why = unsafe { error.as_ref() }.map(|e| e.localizedDescription().to_string()).unwrap_or_default();
+                eprintln!("notifications not allowed{}{why}", if why.is_empty() { "" } else { ": " });
+            }
+        });
+        center.requestAuthorizationWithOptions_completionHandler(UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound, &answered);
+        *held = Some(this);
+    }
+
+    /// Posts one notification and remembers what its click should do.
+    pub fn post(title: &str, text: &str, on_click: Option<Click>) -> Result<()> {
+        let id = format!("agentsignals-{}-{}", std::process::id(), crate::state::now_ms());
+        if let (Some(click), Ok(mut w)) = (on_click, waiting().lock()) {
+            // Notification Centre holds a limited number; so does this.
+            if w.len() >= 64 {
+                drop(w.remove(0));
+            }
+            w.push((id.clone(), click));
+        }
+        let (title, text, id) = (title.to_string(), text.to_string(), id);
+        let (tell, heard) = std::sync::mpsc::channel();
+        super::on_main(move |mtm| {
+            start(mtm);
+            let content = UNMutableNotificationContent::new();
+            content.setTitle(&NSString::from_str(&title));
+            content.setBody(&NSString::from_str(&text));
+            let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&NSString::from_str(&id), &content, None);
+            let center = UNUserNotificationCenter::currentNotificationCenter();
+            let tell = tell.clone();
+            let posted = RcBlock::new(move |error: *mut NSError| {
+                let problem = unsafe { error.as_ref() }.map(|e| e.localizedDescription().to_string());
+                let _ = tell.send(problem);
+            });
+            center.addNotificationRequest_withCompletionHandler(&request, Some(&posted));
+        });
+        // Notification Centre answers on a thread of its own; a short wait turns its refusal into
+        // an error the shared code can show, and a slow answer is not treated as a failure.
+        match heard.recv_timeout(std::time::Duration::from_secs(2)) {
+            Ok(Some(problem)) => Err(problem),
+            _ => Ok(()),
+        }
+    }
 }
 
 // -------------------------------------------------------------- this app's window
@@ -440,6 +602,17 @@ mod tests {
         assert!(!pid_alive(0));
         // Nothing has this pid: the kernel's maximum is far below it.
         assert!(!pid_alive(900_000_000));
+    }
+
+    /// A script that never finishes is given up on instead of holding the worker thread, which
+    /// would leave the session list empty. Takes PATIENCE seconds, so it is run by hand.
+    #[test]
+    #[ignore]
+    fn a_script_that_hangs_is_given_up_on() {
+        let began = std::time::Instant::now();
+        let err = osascript("delay 600").expect_err("a script that never answers must fail");
+        assert!(err.contains("did not answer"), "{err}");
+        assert!(began.elapsed() >= PATIENCE && began.elapsed() < PATIENCE + std::time::Duration::from_secs(5), "{:?}", began.elapsed());
     }
 
     #[test]

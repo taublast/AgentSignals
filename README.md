@@ -123,9 +123,16 @@ permissions it asks for.
 
 ## Download
 
-[Releases](https://github.com/taublast/AgentSignals/releases) have `agentsignals.exe`: one file, no
-installer, run it from any folder. It is not code-signed, so Windows SmartScreen asks once: **More
-info**, then **Run anyway**. Prefer to build it yourself? Read on.
+[Releases](https://github.com/taublast/AgentSignals/releases) have both downloads. Prefer to build
+it yourself? Read on.
+
+**Windows**: `agentsignals.exe`, one file, no installer, run it from any folder. It is not
+code-signed, so Windows SmartScreen asks once: **More info**, then **Run anyway**.
+
+**Mac**: `AgentSignals-<version>-macos.zip`, a universal build for Apple silicon and Intel. Unzip
+it and move **Agent Signals.app** to Applications. It is signed and notarized, so it opens with no
+warning; the first time it needs something, macOS asks for notifications and for permission to
+control Terminal (see [macOS](#macos)).
 
 ## Build and run
 
