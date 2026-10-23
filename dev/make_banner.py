@@ -9,7 +9,7 @@ S = 2
 W, H = 1280 * S, 640 * S
 BG = (18, 20, 28)
 TEXT, MUTED = (255, 255, 255), (156, 163, 175)
-ACCENT = (96, 165, 250)  # the app's blue, a shade lighter to read on the dark background
+ACCENT = (217, 119, 87)  # Claude's orange (#D97757) for "for Claude Code"
 RED, YELLOW, GREEN, GRAY = (239, 68, 68), (250, 204, 21), (34, 160, 70), (107, 114, 128)
 
 def font(name, size):
