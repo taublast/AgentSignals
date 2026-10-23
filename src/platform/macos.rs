@@ -256,8 +256,11 @@ impl Signals {
     /// False when no tab has that title.
     pub fn focus_tab(&self, name: &str) -> Result<bool> {
         let Some(tab) = find_tab(name)? else { return Ok(false) };
+        // A window in the Dock has to be taken out of it first: neither selecting a tab, nor
+        // putting the window first, nor activating Terminal brings a minimized window back, and
+        // Terminal would come forward showing nothing.
         let script = format!(
-            "tell application \"Terminal\"\n    set selected of tab {t} of window id {id} to true\n    set index of window id {id} to 1\n    activate\nend tell",
+            "tell application \"Terminal\"\n    if miniaturized of window id {id} then set miniaturized of window id {id} to false\n    set selected of tab {t} of window id {id} to true\n    set index of window id {id} to 1\n    activate\nend tell",
             t = tab.tab + 1,
             id = tab.window_id
         );
