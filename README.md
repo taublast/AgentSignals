@@ -1,7 +1,7 @@
 <img src="docs/banner.png" alt="Agent Signals for Claude Code: every session in one small window">
 
-**Agent Signals for Claude Code**: a small Windows app that shows all your Claude Code sessions in
-one window and tells you when one finishes or needs you.
+**Agent Signals for Claude Code**: a small app for Windows and macOS that shows all your Claude
+Code sessions in one window and tells you when one finishes or needs you.
 
 If you have dozens of terminals open, each with a Claude Code agent at work, you know the problem:
 which one is done, which one is waiting for your answer, and which one is still busy? Agent Signals
@@ -10,13 +10,13 @@ through tabs to find out.
 
 - **See every session at a glance**: red is waiting for you, yellow is working, green is free.
 - **Know when one finishes**: right-click a session and turn on what you want: a spoken
-  "api-server finished", a sound, a Windows notification, its terminal flashing on the taskbar.
+  "api-server finished", a sound, a notification, a flashing taskbar or Dock icon.
 - **Jump to it**: click a session to bring its terminal tab to the front.
 - **Get them back after a reboot**: one click reopens every session that was open, with its
-  conversation, in its Windows Terminal window and tab order.
+  conversation, in its terminal.
 
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
-A small Windows app written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
+Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
 
 <img src="docs/screenshot.png" alt="Agent Signals: sessions waiting (red), working (yellow) and idle (green) with their signal icons, closed sessions in gray ready to reopen, and recent events" width="420">
 
@@ -32,40 +32,46 @@ A small Windows app written in Rust, its UI drawn with [DrawnUi.Rust](https://gi
 
 **After a reboot** the list starts with "20 sessions from last time are closed" and their names.
 **Reopen 20 sessions from last time** reopens each one with `claude --resume`: its conversation,
-its start folder, its permission mode and its name, in Windows Terminal, grouped into windows and
-tabs as they were, a few seconds apart. **Not now** hides the offer; they stay in the list as closed sessions. A reopened session waits for you;
+its start folder, its permission mode and its name, a few seconds apart. On Windows they come back
+in Windows Terminal, grouped into windows and tabs as they were; on macOS each in a Terminal window
+of its own. **Not now** hides the offer; they stay in the list as closed sessions. A reopened session waits for you;
 it does not continue interrupted work by itself.
 
 ### Sessions started in your home folder
 
 Claude Code never saves trust for the home folder, so a session started there asks "trust this
 folder?" every time it opens, also when it is reopened. Start agents in a folder of their own
-instead, for example `%USERPROFILE%\Agents`; it asks once and stays trusted. To keep the memory
-your agents built in the home folder, give that folder a `.claude\settings.local.json` with
+instead, for example `%USERPROFILE%\Agents` (Windows) or `~/Agents` (macOS); it asks once and
+stays trusted. To keep the memory your agents built in the home folder, give that folder a
+`.claude/settings.local.json` with
 
 ```json
 { "autoMemoryDirectory": "~/.claude/projects/C--Users-<you>/memory" }
 ```
 
+(on macOS `-Users-<you>` in place of `C--Users-<you>`)
+
 (the memory folder of your home folder; Claude Code reads this setting only from local or user
 settings). Conversations started in the home folder resume from the new folder without trouble.
-To have Agent Signals reopen them there too, set `"reopen_home_in": "C:\\Users\\<you>\\Agents"` in
-`%APPDATA%\AgentSignals\sessions.json` while the app is closed.
+To have Agent Signals reopen them there too, set `"reopen_home_in"` to that folder in the app's
+`sessions.json` while the app is closed (`"C:\\Users\\<you>\\Agents"` in
+`%APPDATA%\AgentSignals\sessions.json` on Windows, `"/Users/<you>/Agents"` in
+`~/Library/Application Support/AgentSignals/sessions.json` on macOS).
 
 **One row per Claude Code session**, in this order: waiting for you first, then working, then idle
 with the one that finished last on top, then closed with the one closed last on top.
 
-- **Click** a row: its Windows Terminal tab comes to the front. Click a closed (gray) row and it
-  opens again in a new Windows Terminal tab, with its conversation.
+- **Click** a row: its terminal tab comes to the front. Click a closed (gray) row and it opens
+  again in the terminal, with its conversation.
 - **Right-click** a row (or the Menu key):
   - **📋 Copy name**: the session's name, to paste into a message to it or to another agent.
   - **🔊 Announce when finished**: the app says "<name> finished" every time it finishes.
-  - **🔔 Play a sound when finished**: a short sound (Windows' tada).
-  - **💬 Notify when finished**: a Windows notification "<name> finished". Click it and the
-    session's terminal tab comes to the front, as with a click on its row.
-  - **⚡ Flash taskbar when finished**: the session's terminal window flashes on the taskbar until
-    you switch to it. Taskbar buttons are usually grouped, so the Windows Terminal button flashes:
-    hover it to see which window. Outside Windows Terminal, Agent Signals' own button flashes.
+  - **🔔 Play a sound when finished**: a short sound (tada on Windows, Glass on macOS).
+  - **💬 Notify when finished**: a notification "<name> finished". Click it and the session's
+    terminal tab comes to the front, as with a click on its row.
+  - **⚡ Flash taskbar when finished**: on Windows the session's terminal window flashes on the
+    taskbar until you switch to it (taskbar buttons are usually grouped, so the Windows Terminal
+    button flashes: hover it to see which window). On macOS Agent Signals' own Dock icon bounces.
   - **❌ Close session**: closes its terminal tab after you confirm. Claude ends there; the session
     stays in the list, gray, and a click reopens it.
 
@@ -95,8 +101,8 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 | 18m (no icon) | Idle, finished 18 minutes ago. |
 | 🔊 after the name | You will hear "<name> finished". |
 | 🔔 after the name | You will hear a sound when it finishes. |
-| 💬 after the name | You will get a Windows notification when it finishes. |
-| ⚡ after the name | Its terminal window will flash on the taskbar when it finishes. |
+| 💬 after the name | You will get a notification when it finishes. |
+| ⚡ after the name | Its terminal flashes on the taskbar (Agent Signals bounces in the Dock on macOS) when it finishes. |
 | Line under the name | What it waits for ("input needed"), a status line an agent posted there (see API), or its project folder. |
 
 | In the menu | Meaning |
@@ -108,11 +114,12 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 
 ## Under the hood
 
-- **Sessions** come from Claude Code's own registry, `%USERPROFILE%\.claude\sessions\<pid>.json`
-  (name, `busy` / `idle` / `waiting`). No hooks, nothing to configure in Claude Code.
+- **Sessions** come from Claude Code's own registry, `~/.claude/sessions/<pid>.json` (name, `busy`
+  / `idle` / `waiting`). No hooks, nothing to configure in Claude Code.
 - **Events**: `started`, `finished` (busy to idle), `waiting` (needs input, dialog open), `closed`.
 - **Rules** say which event of which session gives which signal. The menu's signal items make them;
-  they persist in `%APPDATA%\AgentSignals\rules.json`.
+  they persist in the app's folder: `%APPDATA%\AgentSignals` on Windows,
+  `~/Library/Application Support/AgentSignals` on macOS.
 - **Optional, for agents**: a local API (below) lets Claude agents add rules (also for `waiting`,
   `started`, `closed`), signal right away, or post a status line under a session.
 
@@ -135,6 +142,8 @@ warning; the first time it needs something, macOS asks for notifications and for
 control Terminal (see [macOS](#macos)).
 
 ## Build and run
+
+On Windows as below; on macOS see [macOS](#macos).
 
 1. Check the tools:
    ```powershell
@@ -182,12 +191,17 @@ $lnk.TargetPath = "$PWD\target\release\agentsignals.exe"; $lnk.WorkingDirectory 
 Claude Code installed (native installer or Homebrew) and Terminal.app. The session list and the
 signals work with any terminal; selecting, closing and reopening tabs is Terminal.app only.
 
-Build and run it the same way:
+Build and run it from the repository folder:
 
 ```sh
 cargo build --release
 ./target/release/agentsignals
 ```
+
+Run this way it is a bare program, not an app: macOS shows its notifications under the system's
+script tool, and a click on one only dismisses it. The download, a real app, does both properly.
+`dev/release.sh` builds that app: universal (Apple silicon and Intel), signed and notarized when
+Xcode is signed in to an Apple developer account, ad-hoc signed for local use otherwise.
 
 The first launch of the download asks macOS for permission to open it; the app's window appears
 once that is answered. Two more permissions are asked for the first time they are needed, both
@@ -196,8 +210,7 @@ under **System Settings > Privacy & Security**:
 - **Automation > Terminal** — for clicking a row (focus its tab), Close session, and reopening a
   session. Refused, those say so under Recent instead of failing quietly; the list and every signal
   keep working. You can grant it later.
-- **Notifications** — for the `toast` signal. It is posted by the system's own script tool, so it
-  appears under that tool's name in Notification Centre.
+- **Notifications** — for the notification signal; they show under Agent Signals' name.
 
 What differs from Windows:
 
@@ -206,9 +219,6 @@ What differs from Windows:
   one after the other, as they are on Windows.
 - **Flash** always bounces Agent Signals' own Dock icon, never the terminal's: one application
   cannot make another's icon jump. Recent says `flash app` for it.
-- **A click on a notification** only dismisses it. A program without an application bundle cannot
-  be called back by Notification Centre, so the notification cannot focus the session the way it
-  does on Windows. Clicking the session's row in the window still does.
 - **Reopening a session** opens a Terminal **window** of its own, not a tab beside the others:
   putting a tab in a chosen window needs keystroke injection (Accessibility permission), and aimed
   at the wrong window it would open a tab in one of yours.
@@ -227,7 +237,7 @@ Set up Agent Signals from https://github.com/taublast/AgentSignals: clone it, fo
 Build and run section, start the app, then install skill/agent-signals as my personal skill.
 ```
 
-It installs the skill by copying `skill/agent-signals` to `%USERPROFILE%\.claude\skills\agent-signals`
+It installs the skill by copying `skill/agent-signals` to `~/.claude/skills/agent-signals`
 and writing the clone's folder in place of `<app-folder>` in its `SKILL.md`. The skill is optional:
 it lets agents use the API, for example to add a rule when you ask "tell me when any agent needs me".
 
@@ -245,42 +255,49 @@ Optional, for Claude agents and scripts: `http://127.0.0.1:47801`; `GET /` print
 | `POST /note` | `{session, text}` | a line under the session (empty clears) |
 | `POST /focus` | `{session}` | select its terminal tab |
 | `GET /events` | | last 50 events and what fired |
-| `GET /sounds` | | playable .wav names |
+| `GET /sounds` | | playable sound names |
 
-`flash` flashes the session's terminal window (Agent Signals itself when there is no session or
-the session is not in Windows Terminal); `raise` brings Agent Signals forward. Text fields take
-`{name}` and `{waiting}`. Sounds: a name from `GET /sounds` (`%APPDATA%\AgentSignals\sounds`,
-then `C:\Windows\Media`) or a full `.wav` path. Sounds and speech share one queue, so signals never overlap.
+`flash` flashes the session's terminal window (Agent Signals itself when there is no session, the
+session is in a terminal the app does not control, or on macOS); `raise` brings Agent Signals
+forward. Text fields take `{name}` and `{waiting}`. Sounds: a name from `GET /sounds` (the app's
+`sounds` folder, then the system sounds: `C:\Windows\Media` on Windows, `/System/Library/Sounds`
+on macOS) or a full path to a sound file. Sounds and speech share one queue, so signals never
+overlap.
 
 ```powershell
 $r = @{ session = "api-server"; on = "finished"; sound = "tada"; say = "{name} finished" } | ConvertTo-Json
 Invoke-RestMethod -Method Post http://127.0.0.1:47801/rules -Body $r -ContentType application/json
 ```
 
+```sh
+curl -s http://127.0.0.1:47801/rules -d '{"session":"api-server","on":"finished","sound":"Glass","say":"{name} finished"}'
+```
+
 Localhost only, no authentication: any local process can make it beep.
 
 ## Notes
 
-- The session file format is Claude Code's internal one (seen on 2.1.287 to 2.1.294); missing fields are tolerated.
+- The session file format is Claude Code's internal one (seen on 2.1.287 to 2.1.309); missing fields are tolerated.
 - A session with no name of its own (`dev-3f`) shows its custom or AI title in the terminal tab; the app
   reads that title from the transcript tail to find the tab.
-- A toast needs the per-user AUMID `AgentSignals`, registered on start under
+- Windows: a notification needs the per-user AUMID `AgentSignals`, registered on start under
   `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
-- A session that cannot be reopened (Claude Code or Windows Terminal not found) shows under Recent
+- A session that cannot be reopened (Claude Code or the terminal not found) shows under Recent
   as "not reopened" with the reason. A start folder that no longer exists reopens in your home
   folder (or `reopen_home_in`).
-- API `raise`: Windows may refuse to bring a window forward from the background; the taskbar button
-  flashes instead.
+- API `raise` on Windows: Windows may refuse to bring a window forward from the background; the
+  taskbar button flashes instead.
 
 ## What it reads and writes
 
-- Reads `%USERPROFILE%\.claude\sessions\*.json` (Claude Code's list of live sessions) and, from
+- Reads `~/.claude/sessions/*.json` (Claude Code's list of live sessions) and, from
   each session's transcript, its first lines (start folder), its last lines (permission mode) and,
   for a session without a name of its own, its title.
-- Writes `%APPDATA%\AgentSignals\rules.json`, `sessions.json` (the terminal sessions;
-  closed ones stay until you remove them) and, after a crash, `crash.log`; registers the toast AUMID under
-  `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
-- Starts `wt` (Windows Terminal) only when you reopen sessions.
+- Writes `rules.json`, `sessions.json` (the terminal sessions; closed ones stay until you remove
+  them) and, after a crash, `crash.log` in its folder (`%APPDATA%\AgentSignals` on Windows,
+  `~/Library/Application Support/AgentSignals` on macOS). On Windows it registers the notification
+  AUMID under `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
+- Starts a terminal only when you reopen sessions: `wt` on Windows, Terminal.app on macOS.
 - Sends nothing anywhere: the API listens on 127.0.0.1 only.
 
 ## License
