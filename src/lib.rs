@@ -194,7 +194,18 @@ fn menu_overlay() -> Build<SkiaLayout> {
                     me.set_margin(Thickness::new(x, y, 0.0, 0.0));
                 }
             })
-            .children((
+            .children(SkiaStack::new().children((
+                // Title bar: whose menu this is, one line, so the wrong session is not touched.
+                label("", 12)
+                    .text_color(hex(0x9CA3AF))
+                    .max_lines(1)
+                    .padding((12, 4, 12, 4))
+                    .observe(|me, app: &App| {
+                        if let Some(m) = &app.menu {
+                            me.set_text(m.name.clone());
+                        }
+                    }),
+                SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(0x3B4256)),
                 SkiaStack::new().observe(|me, app: &App| me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.closed.is_none() && !m.confirm))).children((
                     menu_item("Copy name", |app, cx| {
                         if let Some(m) = app.menu.take() {
@@ -248,7 +259,7 @@ fn menu_overlay() -> Build<SkiaLayout> {
                             SkiaButton::new("Cancel").font_size(13).width_request(100).background_color(hex(0x3B4256)).on_tapped(|_me, app: &mut App, _cx| app.menu = None),
                         )),
                     )),
-            )))
+            ))))
 }
 
 /// A menu toggle: this signal when the session finishes, on or off.
