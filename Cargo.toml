@@ -6,7 +6,9 @@ publish = false
 
 [dependencies]
 # The engine; Skia comes with it (drawnui-skia-safe), used as drawnui::skia. Do not add skia-safe.
-drawnui = "0.1.0-preview.8"
+# Popup windows (the session menu past the window edge) are on this engine revision until a crate
+# release has them.
+drawnui = { git = "https://github.com/DrawnUi/DrawnUi.Rust", rev = "bee7bb8ba4ab8d8d507cb9dfd9c55ec5241887ee" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

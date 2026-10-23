@@ -737,22 +737,24 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "drawnui"
-version = "0.1.0-preview.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e5d4d13a2af0dec6f1c240739747ad1c373ef9a8269eadd0b24b08ecff72503"
+version = "0.1.0-preview.11"
+source = "git+https://github.com/DrawnUi/DrawnUi.Rust?rev=bee7bb8ba4ab8d8d507cb9dfd9c55ec5241887ee#bee7bb8ba4ab8d8d507cb9dfd9c55ec5241887ee"
 dependencies = [
  "accesskit",
  "accesskit_winit",
  "arboard",
  "ash",
+ "drawnui-skia-bindings",
  "drawnui-skia-safe",
  "glutin",
  "glutin-winit",
  "jni-sys 0.3.1",
  "ndk",
+ "ndk-sys",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
+ "objc2-core-motion",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
@@ -764,9 +766,9 @@ dependencies = [
 
 [[package]]
 name = "drawnui-skia-bindings"
-version = "0.153.6"
+version = "0.153.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "156d5f1efac8d657e13ca1949ba3f9c5986ef3c37e867fd8eaddafcbd4a08548"
+checksum = "6fa981faa3da53b8c69360376bd0c66c1c95c1edacb66411eddbc1b0dfb000f9"
 dependencies = [
  "bindgen",
  "cc",
@@ -781,9 +783,9 @@ dependencies = [
 
 [[package]]
 name = "drawnui-skia-safe"
-version = "0.153.6"
+version = "0.153.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd07cf32db9d6c93162ae8c8f71acf5ad91ff55e5d07259b733c15d1da4e07c1"
+checksum = "6c5ac7835cc3bc377a4188229c31118da418aefc02f75c7af7db7320bb3a815f"
 dependencies = [
  "base64",
  "bitflags 2.13.2",
@@ -1565,6 +1567,16 @@ dependencies = [
  "objc2 0.5.3",
  "objc2-contacts",
  "objc2-foundation 0.2.2",
+]
+
+[[package]]
+name = "objc2-core-motion"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcf94da2dcaad7e727ad6a1ea2312293c776f0df8cbc87fde6654d100a24386a"
+dependencies = [
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]

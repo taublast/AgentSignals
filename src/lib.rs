@@ -49,8 +49,9 @@ struct App {
     session_key: (Vec<(u32, String)>, Vec<String>),
     root: Handle<SkiaLayout>,
     session_stack: Handle<SkiaLayout>,
-    /// The right-click menu of a session, while open.
+    /// The right-click menu of a session, while open, and the popup window showing it.
     menu: Option<Menu>,
+    popup: Option<PopupId>,
     /// The button of the last press on a session row: only the left one focuses its tab.
     button: MouseButton,
     size: Size,
@@ -60,8 +61,6 @@ struct Menu {
     name: String,
     /// A closed session's id: the menu offers Reopen and Remove.
     closed: Option<String>,
-    x: f32,
-    y: f32,
     /// "Close session" chosen: the menu asks to confirm.
     confirm: bool,
 }
@@ -125,7 +124,6 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                 label("", 12).text_color(hex(0x9CA3AF)).observe(|me, app: &App| me.set_text(recent(app))),
             ))),
         )),
-        menu_overlay(),
     ))
 }
 
@@ -164,36 +162,35 @@ fn reopen_banner() -> Build<SkiaShape> {
         )))
 }
 
-/// The session menu over a dimmed window; a tap outside it closes it.
-fn menu_overlay() -> Build<SkiaLayout> {
-    SkiaLayer::new()
-        .fill()
-        .background_color(Color::new(0x5000_0000))
-        .observe(|me, app: &App| me.set_is_visible(app.menu.is_some()))
-        .on_tapped(|_me, app: &mut App, _cx| app.menu = None)
-        // It covers the window: the mouse leaving it left the window, and the menu closes.
-        .on_hovered(|_me, app: &mut App, _cx, on| {
-            if !on {
-                app.menu = None;
-            }
-        })
-        .children(SkiaShape::new()
+/// Opens a session's menu where the right click was, in a popup window of its own: it may reach
+/// past the app window's edges. The engine closes it on a press outside, Escape, or when another
+/// app takes the keyboard; the mouse leaving both windows closes it too.
+fn open_menu(app: &mut App, cx: &mut Cx, menu: Menu, at: Point) {
+    if let Some(open) = app.popup.take() {
+        cx.close_popup_window(open);
+    }
+    app.menu = Some(menu);
+    app.popup = Some(cx.open_popup_window(menu_panel(), at, PopupWindowOptions { close_on_pointer_leave: true, ..Default::default() }));
+}
+
+/// After a menu action: an action that is done with the menu (took `app.menu`) closes its popup.
+fn menu_done(app: &mut App, cx: &mut Cx) {
+    if app.menu.is_none() {
+        if let Some(popup) = app.popup.take() {
+            cx.close_popup_window(popup);
+        }
+    }
+}
+
+/// The session menu's panel, the content of its popup window.
+fn menu_panel() -> Build<SkiaShape> {
+    SkiaShape::new()
             .corner_radius(8)
             .background_color(hex(0x262B3B))
             .stroke_color(hex(0x3B4256))
             .stroke_width(1.55)
             .width_request(MENU_WIDTH)
             .padding((4, 4, 4, 4))
-            // Taps on the panel itself stay in it.
-            .on_tapped(|_me, _app: &mut App, _cx| {})
-            .observe(|me, app: &App| {
-                if let Some(m) = &app.menu {
-                    // Kept inside the window.
-                    let x = m.x.min(app.size.width - MENU_WIDTH - 8.0).max(8.0);
-                    let y = m.y.min(app.size.height - 250.0).max(8.0);
-                    me.set_margin(Thickness::new(x, y, 0.0, 0.0));
-                }
-            })
             .children(SkiaStack::new().children((
                 // Title bar: whose menu this is, one line, so the wrong session is not touched.
                 label("", 12)
@@ -251,15 +248,19 @@ fn menu_overlay() -> Build<SkiaLayout> {
                             }
                         }),
                         SkiaRow::new().spacing(8).children((
-                            SkiaButton::new("Close tab").font_size(13).width_request(100).background_color(hex(0xDC2626)).on_tapped(|_me, app: &mut App, _cx| {
+                            SkiaButton::new("Close tab").font_size(13).width_request(100).background_color(hex(0xDC2626)).on_tapped(|_me, app: &mut App, cx| {
                                 if let Some(m) = app.menu.take() {
                                     let _ = app.tx.send(Cmd::CloseTab(m.name));
                                 }
+                                menu_done(app, cx);
                             }),
-                            SkiaButton::new("Cancel").font_size(13).width_request(100).background_color(hex(0x3B4256)).on_tapped(|_me, app: &mut App, _cx| app.menu = None),
+                            SkiaButton::new("Cancel").font_size(13).width_request(100).background_color(hex(0x3B4256)).on_tapped(|_me, app: &mut App, cx| {
+                                app.menu = None;
+                                menu_done(app, cx);
+                            }),
                         )),
                     )),
-            ))))
+            )))
 }
 
 /// A menu toggle: this signal when the session finishes, on or off.
@@ -279,6 +280,7 @@ fn signal_item(signal: Signal) -> Build<SkiaShape> {
                 app.shared.lock().unwrap().set_finished_signal(&m.name, signal, on);
                 sync(app, cx);
             }
+            menu_done(app, cx);
         })
         .children((label("", 14).observe(move |me, app: &App| {
             if let Some(m) = &app.menu {
@@ -298,7 +300,10 @@ fn menu_item(icon: &str, text: &str, action: fn(&mut App, &mut Cx)) -> Build<Ski
         .accessibility_label(text)
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .on_hovered(hover_item)
-        .on_tapped(move |_me, app: &mut App, cx| action(app, cx))
+        .on_tapped(move |_me, app: &mut App, cx| {
+            action(app, cx);
+            menu_done(app, cx);
+        })
         .children((label(&format!("{icon} {text}"), 14),))
 }
 
@@ -347,8 +352,8 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                 let _ = app.tx.send(Cmd::Focus(focus.clone()));
             }
         })
-        .on_context_menu(move |_me, app: &mut App, _cx, at| {
-            app.menu = Some(Menu { name: menu.clone(), closed: None, x: at.location.x, y: at.location.y, confirm: false });
+        .on_context_menu(move |_me, app: &mut App, cx, at| {
+            open_menu(app, cx, Menu { name: menu.clone(), closed: None, confirm: false }, at.location);
             true
         })
         .children((
@@ -418,9 +423,9 @@ fn closed_row(id: String, name: String) -> Build<SkiaShape> {
                 let _ = app.tx.send(Cmd::ReopenOne(reopen.clone()));
             }
         })
-        .on_context_menu(move |_me, app: &mut App, _cx, at| {
+        .on_context_menu(move |_me, app: &mut App, cx, at| {
             let name = app.inactive(&menu).map_or(String::new(), |s| s.label.clone());
-            app.menu = Some(Menu { name, closed: Some(menu.clone()), x: at.location.x, y: at.location.y, confirm: false });
+            open_menu(app, cx, Menu { name, closed: Some(menu.clone()), confirm: false }, at.location);
             true
         })
         .children((
@@ -546,6 +551,7 @@ pub fn run() {
             root: Handle::default(),
             session_stack: Handle::default(),
             menu: None,
+            popup: None,
             button: MouseButton::Left,
             size: Size::default(),
         };
@@ -553,13 +559,6 @@ pub fn run() {
             Ui::new(app, build)
                 .font_bytes("Default", include_bytes!("../assets/OpenSans-Regular.ttf"))
                 .background(hex(0x12141C))
-                .on_key_down(|app, key, _cx| {
-                    let close = key.key == "Escape" && app.menu.is_some();
-                    if close {
-                        app.menu = None;
-                    }
-                    close
-                })
                 .on_canvas_resized(|app, size, cx| {
                     app.size = size;
                     if !std::mem::replace(&mut app.ticking, true) {
