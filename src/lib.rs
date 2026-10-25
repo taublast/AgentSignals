@@ -222,15 +222,20 @@ const TINTS: [(&str, Option<u32>); 9] = [
     ("Slate", Some(0x64748B)),
 ];
 const ROW: u32 = 0x1C2030;
+/// The row of a session that needs a look (waiting, working, finished unseen): a little brighter
+/// and bluer than the resting row.
+const ROW_ACTIVE: u32 = 0x262E4A;
 const SWATCH: f32 = 26.0;
 const PALETTE_WIDTH: f32 = 9.0 * SWATCH + 8.0 * 6.0 + 2.0 * 12.0 + 8.0;
 
-/// A session row's background: the plain row, or its tint mixed into it (30 %) so text stays readable.
-fn row_color(tint: Option<u32>) -> Color {
-    let Some(t) = tint else { return hex(ROW) };
+/// A session row's background: the resting or the active row, with its tint mixed in (30 %, 38 %
+/// when active) so text stays readable.
+fn row_color(tint: Option<u32>, active: bool) -> Color {
+    let (base, amount) = if active { (ROW_ACTIVE, 0.38) } else { (ROW, 0.3) };
+    let Some(t) = tint else { return hex(base) };
     let mix = |shift: u32| {
-        let (row, tint) = (((ROW >> shift) & 0xFF) as f32, ((t >> shift) & 0xFF) as f32);
-        (row + (tint - row) * 0.3) as u32
+        let (row, tint) = (((base >> shift) & 0xFF) as f32, ((t >> shift) & 0xFF) as f32);
+        (row + (tint - row) * amount) as u32
     };
     hex(mix(16) << 16 | mix(8) << 8 | mix(0))
 }
@@ -464,7 +469,11 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
     SkiaShape::new()
         .corner_radius(10)
         .background_color(hex(ROW))
-        .observe(move |me, app: &App| me.set_background_color(row_color(app.tint(&tint))))
+        .observe(move |me, app: &App| {
+            // Brighter while it needs a look: not idle, or finished while you looked elsewhere.
+            let active = app.session(pid).is_some_and(|s| s.status != "idle" || app.unseen.contains(&s.id));
+            me.set_background_color(row_color(app.tint(&tint), active));
+        })
         .padding((12, 10, 12, 10))
         .fill_x()
         .accessibility_role(Aria::BUTTON)
@@ -540,7 +549,7 @@ fn closed_row(id: String, name: String) -> Build<SkiaShape> {
     SkiaShape::new()
         .corner_radius(10)
         .background_color(hex(ROW))
-        .observe(move |me, app: &App| me.set_background_color(row_color(app.tint(&tint))))
+        .observe(move |me, app: &App| me.set_background_color(row_color(app.tint(&tint), false)))
         .padding((12, 10, 12, 10))
         .fill_x()
         .accessibility_role(Aria::BUTTON)

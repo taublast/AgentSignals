@@ -59,7 +59,8 @@ To have Agent Signals reopen them there too, set `"reopen_home_in"` to that fold
 `%APPDATA%\AgentSignals\sessions.json` on Windows, `"/Users/<you>/Agents"` in
 `~/Library/Application Support/AgentSignals/sessions.json` on macOS).
 
-**One row per Claude Code session**, in this order: waiting for you first, then working, then idle
+**One row per Claude Code session**; the rows of sessions that need a look (waiting, working, finished
+unseen) are a little brighter than idle and closed ones. In this order: waiting for you first, then working, then idle
 with the one that finished last on top, then closed with the one closed last on top.
 
 - **Click** a row: its terminal tab comes to the front. Click a closed (gray) row and it opens
