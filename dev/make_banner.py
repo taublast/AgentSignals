@@ -39,9 +39,9 @@ d.text((74 * S, 464 * S), "Click to jump to its terminal, or reopen a closed one
 # Status legend.
 x = 76
 f = font("seguisb.ttf", 18)
-# The app's status dots: red waits for you, green works, gray rests or is closed.
-WORKING = (34, 197, 94)
-for label, c in [("waiting", RED), ("working", WORKING), ("idle or closed", GRAY)]:
+# The app's status dots: red waits for you, yellow works, green just finished, gray rests or is closed.
+FINISHED = (34, 197, 94)
+for label, c in [("waiting", RED), ("working", YELLOW), ("finished", FINISHED), ("idle or closed", GRAY)]:
     d.ellipse([x * S, 536 * S, (x + 14) * S, 550 * S], fill=c)
     d.text(((x + 22) * S, 530 * S), label, font=f, fill=MUTED)
     x += 22 + int(d.textlength(label, font=f) / S) + 30

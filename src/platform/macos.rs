@@ -336,7 +336,7 @@ impl Signals {
     }
 
     /// The title of the tab the user is looking at. Not done on macOS yet: `None` = nothing is
-    /// being looked at, so every session that finishes stays highlighted until it is clicked.
+    /// being looked at, so every session that finishes keeps its green dot until it is clicked.
     // ponytail: the selected tab of Terminal's front window when Terminal is the frontmost app.
     pub fn viewed_tab(&self) -> Option<String> {
         None

@@ -48,7 +48,7 @@ struct App {
     inactive: Vec<Saved>,
     /// Lower-case session name to its row tint.
     tints: HashMap<String, u32>,
-    /// Ids of sessions that finished unseen: their rows are outlined.
+    /// Ids of sessions that finished unseen: their dots are green.
     unseen: std::collections::HashSet<String>,
     /// The user folder: a session started there shows no folder line.
     home: String,
@@ -436,12 +436,15 @@ fn section(title: &str) -> Build<SkiaLabel> {
 
 /// Idle and closed sessions: the quiet gray.
 const IDLE: u32 = 0x6B7280;
+/// The dot of a session that finished while its terminal tab was not in front, until seen.
+const FINISHED: u32 = 0x22C55E;
 
 fn status_color(status: &str) -> Color {
     match status {
-        // Red asks you something, green works, gray rests (as closed sessions are gray).
+        // Red asks you something, yellow works, gray rests (as closed sessions are gray); green is
+        // `FINISHED`, an idle session not looked at yet.
         "waiting" => hex(0xEF4444),
-        "busy" => hex(0x22C55E),
+        "busy" => hex(0xFACC15),
         _ => hex(IDLE),
     }
 }
@@ -474,23 +477,15 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
             true
         })
         .children((
-            // Finished while its tab was not in front: outlined until seen. Its own layer over
-            // the whole row, so showing it moves nothing.
-            SkiaShape::new()
-                .fill()
-                .margin((-12, -10, -12, -10))
-                .corner_radius(10)
-                .stroke_width(2)
-                .observe(move |me, app: &App| {
-                    let unseen = app.session(pid).is_some_and(|s| app.unseen.contains(&s.id));
-                    me.set_stroke_color(if unseen { hex(0x22C55E) } else { Color::TRANSPARENT });
-                }),
             SkiaShape::new()
                 .corner_radius(5)
                 .width_request(10)
                 .height_request(10)
                 .vertical_options(LayoutOptions::Center)
-                .observe(move |me, app: &App| me.set_background_color(status_color(app.session(pid).map_or("", |s| &s.status)))),
+                .observe(move |me, app: &App| {
+                    let Some(s) = app.session(pid) else { return };
+                    me.set_background_color(if app.unseen.contains(&s.id) { hex(FINISHED) } else { status_color(&s.status) });
+                }),
             SkiaStack::new().margin((22, 0, 84, 0)).spacing(2).children((
                 label(&name, 15).text_color(Color::WHITE).observe(move |me, app: &App| {
                     let icons = state::rule_icons(&app.rules, &name);
