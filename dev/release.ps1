@@ -17,7 +17,7 @@ $targets = [ordered]@{ 'x64' = 'x86_64-pc-windows-msvc'; 'arm64' = 'aarch64-pc-w
 Push-Location $repo
 try {
     foreach ($arch in $Arch) {
-        if (-not $targets.Contains($arch)) { throw "unknown architecture $arch (x64, arm64)" }
+        if ($targets.Keys -notcontains $arch) { throw "unknown architecture $arch (x64, arm64)" }
         $target = $targets[$arch]
         cargo build --release --target $target
         if ($LASTEXITCODE) { throw "build failed for $target" }
