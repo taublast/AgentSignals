@@ -687,6 +687,7 @@ pub fn run() {
                 .on_canvas_resized(|app, size, cx| {
                     app.size = size;
                     if !std::mem::replace(&mut app.ticking, true) {
+                        let _ = app.tx.send(Cmd::WindowReady);
                         tick(app, cx);
                     }
                 }),

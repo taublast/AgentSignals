@@ -543,6 +543,10 @@ pub fn raise_app() {
     });
 }
 
+/// No maximizing (the green zoom button). Not done on macOS yet.
+// ponytail: disable the window's standardWindowButton(ZoomButton) on the main thread, as set_topmost does.
+pub fn no_maximize() {}
+
 /// Keeps this app's window above all others, or not.
 pub fn set_topmost(on: bool) {
     on_main(move |mtm| {

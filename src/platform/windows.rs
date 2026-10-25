@@ -19,7 +19,7 @@ use windows::Win32::UI::Accessibility::{
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FLASHW_ALL, FLASHW_TIMERNOFG, FLASHWINFO, FlashWindowEx, GetClassNameW, GetWindowTextW,
     GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, MB_ICONERROR, MB_OK, MessageBoxW, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE,
-    GetForegroundWindow, SWP_NOSIZE, SetForegroundWindow, SetWindowPos, ShowWindow,
+    GWL_STYLE, GetForegroundWindow, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOZORDER, SetWindowLongPtrW, WS_MAXIMIZEBOX, SWP_NOSIZE, SetForegroundWindow, SetWindowPos, ShowWindow,
 };
 use windows::core::{BOOL, HSTRING, w};
 
@@ -344,6 +344,17 @@ fn raise(hwnd: HWND) {
 pub fn error_box(text: &str) {
     unsafe {
         MessageBoxW(None, &HSTRING::from(text), &HSTRING::from(crate::TITLE), MB_OK | MB_ICONERROR);
+    }
+}
+
+/// Takes the maximize button off this app's window; without it Windows also skips maximizing on a
+/// title bar double-click and on a drag to the top of the screen.
+pub fn no_maximize() {
+    let Some(hwnd) = own_window() else { return };
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style & !(WS_MAXIMIZEBOX.0 as isize));
+        let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
     }
 }
 

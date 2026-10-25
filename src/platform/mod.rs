@@ -10,7 +10,8 @@
 //!   `viewed_tab() -> Option<String>` (the title of the selected tab of the terminal window in front;
 //!   `None` when no terminal window is in front).
 //!   A tab title is the session's name after a status marker; match it with `state::tab_is`.
-//! - This app's window: `flash_app()`, `raise_app()`, `set_topmost(bool)`; `error_box(text)` when
+//! - This app's window: `flash_app()`, `raise_app()`, `set_topmost(bool)`, `no_maximize()` (once,
+//!   when the window exists: no maximize button, no maximizing by double-click or snapping); `error_box(text)` when
 //!   the app cannot start (no window yet).
 //! - `pid_alive(pid)`.
 //! - Folders: `home_dir()` (where `.claude` lives), `data_dir()` (the per-user app data folder;

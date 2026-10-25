@@ -18,6 +18,8 @@ pub enum Cmd {
     /// Close the session's terminal tab (confirmed in the UI).
     CloseTab(String),
     Topmost(bool),
+    /// The app's window exists: settle what the window gets once (no maximize).
+    WindowReady,
     /// Reopen the sessions a reboot closed (`State::reopen`).
     Reopen,
     /// Not now: they stay in the list as closed sessions.
@@ -262,6 +264,7 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<
         }
         Cmd::CloseTab(name) => tab_command(signals, shared, name, "close", Signals::close_tab),
         Cmd::Topmost(on) => platform::set_topmost(on),
+        Cmd::WindowReady => platform::no_maximize(),
     }
 }
 
