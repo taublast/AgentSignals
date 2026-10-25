@@ -595,6 +595,16 @@ pub fn pid_alive(pid: u32) -> bool {
 mod tests {
     use super::*;
 
+    /// The live tests below drive the one Terminal this machine has: each opens windows and reads
+    /// the whole tab list, so two of them at once see each other's tabs and one gives up on a tab
+    /// the other is still using. Each holds this for its whole run, which makes them safe under the
+    /// default thread pool. A test that panics leaves the lock poisoned without making the next one
+    /// wrong, so the poison is taken back instead of failing the rest of the suite with it.
+    fn one_terminal_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+        static TERMINAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        TERMINAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn quoting() {
         // A folder or a session name with a quote stays one word of the command line.
@@ -628,6 +638,7 @@ mod tests {
     #[test]
     #[ignore]
     fn a_script_that_hangs_is_given_up_on() {
+        let _terminal = one_terminal_at_a_time();
         let began = std::time::Instant::now();
         let err = osascript("delay 600").expect_err("a script that never answers must fail");
         assert!(err.contains("did not answer"), "{err}");
@@ -677,11 +688,11 @@ mod tests {
     }
 
     /// Opens a real Terminal window with a stand-in for claude, then ends it the way Close session
-    /// does and checks the tab is gone. Run by hand, one at a time:
-    /// `cargo test --release -- --ignored --test-threads=1`.
+    /// does and checks the tab is gone. Run by hand: `cargo test --release -- --ignored`.
     #[test]
     #[ignore]
     fn terminal_starts_and_closes_the_session() {
+        let _terminal = one_terminal_at_a_time();
         let root = std::env::temp_dir().join(format!("agentsignals-test-{}-term", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let (folder, log) = (root.join("my work's folder"), root.join("log.txt"));
@@ -729,6 +740,7 @@ mod tests {
     #[test]
     #[ignore]
     fn a_closed_session_reopens() {
+        let _terminal = one_terminal_at_a_time();
         let root = std::env::temp_dir().join(format!("agentsignals-test-{}-reopen", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let (folder, log) = (root.join("reopened here"), root.join("log.txt"));
