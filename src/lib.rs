@@ -18,7 +18,8 @@ use worker::Cmd;
 const TICK_MS: f32 = 1000.0;
 /// Blue of the switches when on.
 const ACCENT: u32 = 0x3B82F6;
-/// The switches: the engine's default width, flatter.
+/// The switches: the engine's default width, flatter. Off: the slate of the menu borders, a light
+/// thumb; on: the accent blue.
 const SWITCH_WIDTH: f32 = 46.0;
 const SWITCH_HEIGHT: f32 = 22.0;
 const MENU_WIDTH: f32 = 260.0;
@@ -98,6 +99,8 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                         .color_frame_on(hex(ACCENT))
                         .width_request(SWITCH_WIDTH)
                         .height_request(SWITCH_HEIGHT)
+                        .color_frame_off(hex(0x3B4256))
+                        .color_thumb_off(hex(0xC9CDD4))
                         .accessibility_label("Keep window on top")
                         .vertical_options(LayoutOptions::Center)
                         .on_toggled(|_me, app: &mut App, _cx, on| {
@@ -110,6 +113,8 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                         .color_frame_on(hex(ACCENT))
                         .width_request(SWITCH_WIDTH)
                         .height_request(SWITCH_HEIGHT)
+                        .color_frame_off(hex(0x3B4256))
+                        .color_thumb_off(hex(0xC9CDD4))
                         .accessibility_label("Mute all signals")
                         .vertical_options(LayoutOptions::Center)
                         .observe(|me, app: &App| me.set_is_toggled(app.muted))
