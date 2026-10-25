@@ -248,7 +248,18 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<
                 fired,
             });
         }
-        Cmd::Focus(name) => tab_command(signals, shared, name, "focus", Signals::focus_tab),
+        Cmd::Focus(name) => {
+            // Asked for by the user (a row or a notification): seen, also where the tab in front
+            // cannot be read.
+            {
+                let mut st = shared.lock().unwrap();
+                let ids: Vec<String> = st.sessions.iter().filter(|s| s.name.eq_ignore_ascii_case(&name)).map(|s| s.id.clone()).collect();
+                if ids.iter().any(|id| st.unseen.remove(id)) {
+                    st.version += 1;
+                }
+            }
+            tab_command(signals, shared, name, "focus", Signals::focus_tab)
+        }
         Cmd::CloseTab(name) => tab_command(signals, shared, name, "close", Signals::close_tab),
         Cmd::Topmost(on) => platform::set_topmost(on),
     }
