@@ -8,7 +8,7 @@ which one is done, which one is waiting for your answer, and which one is still 
 puts all of them in one small window and tells you when something happens, so you stop cycling
 through tabs to find out.
 
-- **See every session at a glance**: red is waiting for you, yellow is working, green has just
+- **See every session at a glance**: yellow is waiting for you, green is working, red has just
   finished, gray is free.
 - **Know when one finishes**: right-click a session and turn on what you want: a spoken
   "api-server finished", a sound, a notification, a flashing taskbar or Dock icon.
@@ -19,7 +19,7 @@ through tabs to find out.
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
 Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
 
-<img src="docs/screenshot.png" alt="Agent Signals: sessions waiting (red), working (yellow), just finished (green) and idle (gray) with their signal icons, closed sessions ready to reopen, and recent events" width="420">
+<img src="docs/screenshot.png" alt="Agent Signals: sessions waiting (yellow), working (green), just finished (red) and idle (gray) with their signal icons, closed sessions ready to reopen, and recent events" width="420">
 
 ## The window
 
@@ -89,7 +89,7 @@ sessions that run in a terminal are kept, and only once they have a conversation
 before its first message has nothing to reopen).
 
 **Finished while you looked elsewhere**: a session that finishes while its terminal tab is not the one
-in front gets a green dot, so you see what is new. It turns gray when you click the row, switch to its
+in front gets a red dot, so you see what is new. It turns gray when you click the row, switch to its
 tab yourself, or the session starts working again (on macOS, for now, only the click and new work
 clear it).
 
@@ -101,9 +101,9 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 
 | On a row | Meaning |
 |---|---|
-| 🔴 red dot | The session waits for you: a question, a permission dialog. |
-| 🟡 yellow dot | The session is working. |
-| 🟢 green dot | It finished while you were not looking at its terminal tab: new for you. |
+| 🟡 yellow dot | The session waits for you: a question, a permission dialog. |
+| 🟢 green dot | The session is working. |
+| 🔴 red dot | It finished while you were not looking at its terminal tab: new for you. |
 | ⚪ gray dot | The session is idle: it finished and has nothing to do. |
 | ⚪ gray dot, gray name, "closed 2h" | The session is closed: its terminal is gone. Click to reopen it. |
 | ✋ 1m | Waiting for you, for 1 minute so far. |

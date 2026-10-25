@@ -48,7 +48,7 @@ struct App {
     inactive: Vec<Saved>,
     /// Lower-case session name to its row tint.
     tints: HashMap<String, u32>,
-    /// Ids of sessions that finished unseen: their dots are green.
+    /// Ids of sessions that finished unseen: their dots are red.
     unseen: std::collections::HashSet<String>,
     /// The user folder: a session started there shows no folder line.
     home: String,
@@ -437,14 +437,14 @@ fn section(title: &str) -> Build<SkiaLabel> {
 /// Idle and closed sessions: the quiet gray.
 const IDLE: u32 = 0x6B7280;
 /// The dot of a session that finished while its terminal tab was not in front, until seen.
-const FINISHED: u32 = 0x22C55E;
+const FINISHED: u32 = 0xEF4444;
 
 fn status_color(status: &str) -> Color {
     match status {
-        // Red asks you something, yellow works, gray rests (as closed sessions are gray); green is
+        // Yellow asks you something, green works, gray rests (as closed sessions are gray); red is
         // `FINISHED`, an idle session not looked at yet.
-        "waiting" => hex(0xEF4444),
-        "busy" => hex(0xFACC15),
+        "waiting" => hex(0xFACC15),
+        "busy" => hex(0x22C55E),
         _ => hex(IDLE),
     }
 }
@@ -515,7 +515,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                 .observe(move |me, app: &App| {
                     let Some(s) = app.session(pid) else { return };
                     me.set_text_color(status_color(&s.status));
-                    // Idle needs no icon: the green dot says it.
+                    // Idle needs no icon: the gray dot says it.
                     let icon = match s.status.as_str() {
                         "busy" => "⚙ ", // no U+FE0F: without text shaping it only adds an empty advance
                         "waiting" => "✋ ",

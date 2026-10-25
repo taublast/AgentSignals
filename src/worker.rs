@@ -85,7 +85,7 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
             state::sort_sessions(&mut sessions);
             st.sessions = sessions;
             st.version += 1;
-            // A session that finished while nobody looked at its tab gets a green dot.
+            // A session that finished while nobody looked at its tab gets a red dot.
             let viewed = if events.iter().any(|e| e.kind == "finished") { signals.viewed_tab() } else { None };
             for event in events.iter().filter(|e| e.kind == "finished") {
                 if let Some(s) = live.get(&event.pid).filter(|s| !s.id.is_empty()) {
@@ -117,8 +117,8 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
     }
 }
 
-/// A finished session's green dot goes once its tab is in front, or when it works again or ends.
-/// The tab in front is read only while some dot is green.
+/// A finished session's red dot goes once its tab is in front, or when it works again or ends.
+/// The tab in front is read only while some dot is red.
 fn unseen(signals: &Signals, shared: &Shared, live: &HashMap<u32, Session>) {
     let ids: Vec<String> = shared.lock().unwrap().unseen.iter().cloned().collect();
     if ids.is_empty() {
