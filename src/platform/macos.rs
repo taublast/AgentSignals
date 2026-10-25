@@ -334,6 +334,13 @@ impl Signals {
     pub fn flash_terminal(&self, _name: &str) -> bool {
         false
     }
+
+    /// The title of the tab the user is looking at. Not done on macOS yet: `None` = nothing is
+    /// being looked at, so every session that finishes stays highlighted until it is clicked.
+    // ponytail: the selected tab of Terminal's front window when Terminal is the frontmost app.
+    pub fn viewed_tab(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Ends what runs in a terminal device: its session leader, which hangs up its children with it.

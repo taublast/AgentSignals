@@ -6,7 +6,9 @@
 //!   `new()`, `sound(&Path)`, `say(&str)`, `toast(title, text, on_click)` (`on_click` may run on
 //!   any thread), `focus_tab(title) -> Result<bool>`, `close_tab(title) -> Result<bool>`
 //!   (`Ok(false)`: no terminal tab with that title), `tab_layout() -> Vec<(window, tab, title)>`,
-//!   `flash_terminal(title) -> bool` (false: no terminal window with that tab).
+//!   `flash_terminal(title) -> bool` (false: no terminal window with that tab),
+//!   `viewed_tab() -> Option<String>` (the title of the selected tab of the terminal window in front;
+//!   `None` when no terminal window is in front).
 //!   A tab title is the session's name after a status marker; match it with `state::tab_is`.
 //! - This app's window: `flash_app()`, `raise_app()`, `set_topmost(bool)`; `error_box(text)` when
 //!   the app cannot start (no window yet).

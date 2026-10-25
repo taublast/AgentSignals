@@ -83,6 +83,15 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
             state::sort_sessions(&mut sessions);
             st.sessions = sessions;
             st.version += 1;
+            // A session that finished while nobody looked at its tab is highlighted.
+            let viewed = if events.iter().any(|e| e.kind == "finished") { signals.viewed_tab() } else { None };
+            for event in events.iter().filter(|e| e.kind == "finished") {
+                if let Some(s) = live.get(&event.pid).filter(|s| !s.id.is_empty()) {
+                    if !viewed.as_deref().is_some_and(|v| state::tab_is(v, &tab_title(s))) {
+                        st.unseen.insert(s.id.clone());
+                    }
+                }
+            }
             for mut event in events {
                 let waiting = live.get(&event.pid).map_or(String::new(), |s| s.waiting_for.clone());
                 let tab = live.get(&event.pid).map_or(String::new(), tab_title);
@@ -98,10 +107,35 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
                 st.log(event);
             }
         }
+        unseen(&signals, &shared, &live);
         // After the list is out: reading the terminals' tab layout can be slow (a permission
         // prompt on macOS), and the window must not wait for it.
         remember(&signals, &shared, &mut memory, &live, first, &mut layout_ids, &mut layout_at);
         first = false;
+    }
+}
+
+/// Highlighted sessions stop being highlighted once their tab is in front, or when they work again
+/// or end. The tab in front is read only while something is highlighted.
+fn unseen(signals: &Signals, shared: &Shared, live: &HashMap<u32, Session>) {
+    let ids: Vec<String> = shared.lock().unwrap().unseen.iter().cloned().collect();
+    if ids.is_empty() {
+        return;
+    }
+    let viewed = signals.viewed_tab();
+    let seen: Vec<String> = ids
+        .into_iter()
+        .filter(|id| match live.values().find(|s| &s.id == id) {
+            Some(s) => s.status != "idle" || viewed.as_deref().is_some_and(|v| state::tab_is(v, &tab_title(s))),
+            None => true,
+        })
+        .collect();
+    if !seen.is_empty() {
+        let mut st = shared.lock().unwrap();
+        for id in &seen {
+            st.unseen.remove(id);
+        }
+        st.version += 1;
     }
 }
 

@@ -87,6 +87,11 @@ with the one that finished last on top, then closed with the one closed last on 
 sessions that run in a terminal are kept, and only once they have a conversation (a session closed
 before its first message has nothing to reopen).
 
+**Finished while you looked elsewhere**: a session that finishes while its terminal tab is not the one
+in front gets a green outline, so you see what is new. It goes when you click the row, switch to its
+tab yourself, or the session starts working again (on macOS, for now, only the click and new work
+clear it).
+
 **Recent**: the last status changes ("frontend finished after 17m") and which signals they gave.
 
 The list scrolls when it is longer than the window; the bar on the right shows where you are.
@@ -99,6 +104,7 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 | 🟡 yellow dot | The session is working. |
 | 🟢 dark green dot | The session is idle: it finished and has nothing to do. |
 | ⚪ gray dot, "closed 2h" | The session is closed: its terminal is gone. Click to reopen it. |
+| green outline | It finished while you were not looking at its terminal tab. It goes when you click the row, switch to its tab, or it starts working again. |
 | ✋ 1m | Waiting for you, for 1 minute so far. |
 | ⚙ 4m | Working, for 4 minutes so far. |
 | 18m (no icon) | Idle, finished 18 minutes ago. |

@@ -19,7 +19,7 @@ use windows::Win32::UI::Accessibility::{
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FLASHW_ALL, FLASHW_TIMERNOFG, FLASHWINFO, FlashWindowEx, GetClassNameW, GetWindowTextW,
     GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, MB_ICONERROR, MB_OK, MessageBoxW, SW_RESTORE, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SetForegroundWindow, SetWindowPos, ShowWindow,
+    GetForegroundWindow, SWP_NOSIZE, SetForegroundWindow, SetWindowPos, ShowWindow,
 };
 use windows::core::{BOOL, HSTRING, w};
 
@@ -184,6 +184,32 @@ impl Signals {
 
     /// Every Windows Terminal tab: (window number, tab position, title). Tabs of one window share
     /// the number; numbers follow the windows' order on screen at this moment.
+    /// The title of the tab the user is looking at: the selected tab of the Windows Terminal window
+    /// in front. `None` when another window is in front.
+    pub fn viewed_tab(&self) -> Option<String> {
+        let uia = self.uia.as_ref()?;
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            let mut class = [0u16; 128];
+            let n = GetClassNameW(hwnd, &mut class) as usize;
+            if String::from_utf16_lossy(&class[..n]) != TERMINAL_CLASS {
+                return None;
+            }
+            let all = uia.ElementFromHandle(hwnd).and_then(|e| e.FindAll(TreeScope_Descendants, &uia.CreateTrueCondition()?)).ok()?;
+            for i in 0..all.Length().unwrap_or(0) {
+                let Ok(tab) = all.GetElement(i) else { continue };
+                if tab.CurrentControlType().ok() != Some(UIA_TabItemControlTypeId) {
+                    continue;
+                }
+                let selected = tab.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId).and_then(|p| p.CurrentIsSelected());
+                if selected.is_ok_and(|s| s.as_bool()) {
+                    return tab.CurrentName().ok().map(|t| t.to_string());
+                }
+            }
+        }
+        None
+    }
+
     pub fn tab_layout(&self) -> Vec<(u32, u32, String)> {
         let mut out = Vec::new();
         let Some(uia) = self.uia.as_ref() else { return out };

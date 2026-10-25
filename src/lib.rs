@@ -45,6 +45,8 @@ struct App {
     inactive: Vec<Saved>,
     /// Lower-case session name to its row tint.
     tints: HashMap<String, u32>,
+    /// Ids of sessions that finished unseen: their rows are outlined.
+    unseen: std::collections::HashSet<String>,
     /// The user folder: a session started there shows no folder line.
     home: String,
     /// What the rows were built from: rebuilt only when it changes.
@@ -441,7 +443,13 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
     SkiaShape::new()
         .corner_radius(10)
         .background_color(hex(ROW))
-        .observe(move |me, app: &App| me.set_background_color(row_color(app.tint(&tint))))
+        .observe(move |me, app: &App| {
+            me.set_background_color(row_color(app.tint(&tint)));
+            // Finished while its tab was not in front: outlined in the idle green until seen.
+            let unseen = app.session(pid).is_some_and(|s| app.unseen.contains(&s.id));
+            me.set_stroke_color(if unseen { hex(0x22C55E) } else { Color::TRANSPARENT });
+        })
+        .stroke_width(2)
         .padding((12, 10, 12, 10))
         .fill_x()
         .accessibility_role(Aria::BUTTON)
@@ -595,6 +603,7 @@ fn sync(app: &mut App, cx: &mut Cx) {
         app.reopen = st.reopen.iter().map(|s| s.label.clone()).collect();
         app.inactive = st.inactive.clone();
         app.tints = st.tints.clone();
+        app.unseen = st.unseen.clone();
         drop(st);
         let key = (
             app.sessions.iter().map(|s| (s.pid, s.name.clone())).collect::<Vec<_>>(),
@@ -656,6 +665,7 @@ pub fn run() {
             session_key: (Vec::new(), Vec::new()),
             inactive: Vec::new(),
             tints: HashMap::new(),
+            unseen: Default::default(),
             root: Handle::default(),
             session_stack: Handle::default(),
             menu: None,

@@ -120,6 +120,9 @@ pub struct State {
     pub inactive: Vec<crate::restore::Saved>,
     /// Lower-case session name to the color its row is tinted with (0xRRGGBB); in settings.json.
     pub tints: HashMap<String, u32>,
+    /// Ids of sessions that finished while their terminal tab was not in front: highlighted until
+    /// the user looks at that tab, clicks the row, or the session works again.
+    pub unseen: std::collections::HashSet<String>,
 }
 
 /// settings.json: what the user set in the window that is not a rule.
