@@ -24,10 +24,10 @@ Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://git
 
 **Top bar**
 
-- **Mute**: silences every signal until you switch it off, for example during a call. Status
-  changes are still listed under Recent.
 - **On top**: keeps the window above all other windows, so it stays visible while you work in the
   terminals.
+- **Mute**: silences every signal until you switch it off, for example during a call. Status
+  changes are still listed under Recent.
 - **Counts**: how many sessions are waiting for you, working, and idle.
 
 **After a reboot** the list starts with "20 sessions from last time are closed" and their names.

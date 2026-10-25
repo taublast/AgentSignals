@@ -18,6 +18,9 @@ use worker::Cmd;
 const TICK_MS: f32 = 1000.0;
 /// Blue of the switches when on.
 const ACCENT: u32 = 0x3B82F6;
+/// The switches: the engine's default width, flatter.
+const SWITCH_WIDTH: f32 = 46.0;
+const SWITCH_HEIGHT: f32 = 22.0;
 const MENU_WIDTH: f32 = 260.0;
 /// The window title; the Windows side finds the app's window by it.
 pub(crate) const TITLE: &str = "Agent Signals";
@@ -93,6 +96,20 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                 SkiaRow::new().spacing(8).children((
                     SkiaSwitch::new()
                         .color_frame_on(hex(ACCENT))
+                        .width_request(SWITCH_WIDTH)
+                        .height_request(SWITCH_HEIGHT)
+                        .accessibility_label("Keep window on top")
+                        .vertical_options(LayoutOptions::Center)
+                        .on_toggled(|_me, app: &mut App, _cx, on| {
+                            let _ = app.tx.send(Cmd::Topmost(on));
+                        }),
+                    label("On top", 14).vertical_options(LayoutOptions::Center),
+                )),
+                SkiaRow::new().spacing(8).children((
+                    SkiaSwitch::new()
+                        .color_frame_on(hex(ACCENT))
+                        .width_request(SWITCH_WIDTH)
+                        .height_request(SWITCH_HEIGHT)
                         .accessibility_label("Mute all signals")
                         .vertical_options(LayoutOptions::Center)
                         .observe(|me, app: &App| me.set_is_toggled(app.muted))
@@ -102,16 +119,6 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                             st.version += 1;
                         }),
                     label("Mute", 14).vertical_options(LayoutOptions::Center),
-                )),
-                SkiaRow::new().spacing(8).children((
-                    SkiaSwitch::new()
-                        .color_frame_on(hex(ACCENT))
-                        .accessibility_label("Keep window on top")
-                        .vertical_options(LayoutOptions::Center)
-                        .on_toggled(|_me, app: &mut App, _cx, on| {
-                            let _ = app.tx.send(Cmd::Topmost(on));
-                        }),
-                    label("On top", 14).vertical_options(LayoutOptions::Center),
                 )),
                 label("", 13).text_color(hex(0x9CA3AF)).vertical_options(LayoutOptions::Center).observe(|me, app: &App| {
                     let count = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
