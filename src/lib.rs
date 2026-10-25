@@ -119,6 +119,9 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                         .vertical_options(LayoutOptions::Center)
                         .observe(|me, app: &App| me.set_is_toggled(app.muted))
                         .on_toggled(|_me, app: &mut App, _cx, on| {
+                            // The window's copy too, at once: `observe` sets the switch from it, and a
+                            // copy still saying the old value until the next sync would flip it back.
+                            app.muted = on;
                             let mut st = app.shared.lock().unwrap();
                             st.muted = on;
                             st.version += 1;
