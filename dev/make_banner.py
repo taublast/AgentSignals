@@ -48,7 +48,7 @@ for label, c in [("waiting", YELLOW), ("working", WORKING), ("finished", RED), (
 
 # Right: the real window, top part, bleeding off the bottom edge.
 shot = Image.open(rf"{REPO}\docs\screenshot.png").convert("RGBA")
-shot = shot.crop((0, 0, shot.width, 860))
+shot = shot.crop((0, 0, shot.width, min(860, shot.height)))
 scale = 1.02 * S
 shot = shot.resize((int(shot.width * scale), int(shot.height * scale)), Image.LANCZOS)
 px, py = 760 * S, 64 * S
