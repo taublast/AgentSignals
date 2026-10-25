@@ -89,9 +89,8 @@ with the one that finished last on top, then closed with the one closed last on 
 sessions that run in a terminal are kept, and only once they have a conversation (a session closed
 before its first message has nothing to reopen).
 
-**Finished while you looked elsewhere**: a session that finishes while its terminal tab is not the one
-in front gets a red dot, so you see what is new. It turns gray when you click the row, switch to its
-tab yourself, or the session starts working again.
+**Just finished**: a session that finishes gets a red dot, so you see what is new. It turns gray when
+you click the row (or its notification), or the session starts working again.
 
 **Recent**: the last status changes ("frontend finished after 17m") and which signals they gave.
 
@@ -103,7 +102,7 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 |---|---|
 | 🟡 yellow dot | The session waits for you: a question, a permission dialog. |
 | 🟢 green dot | The session is working. |
-| 🔴 red dot | It finished while you were not looking at its terminal tab: new for you. |
+| 🔴 red dot | It just finished and you have not clicked it yet: new for you. |
 | ⚪ gray dot | The session is idle: it finished and has nothing to do. |
 | ⚪ gray dot, gray name, "closed 2h" | The session is closed: its terminal is gone. Click to reopen it. |
 | ✋ 1m | Waiting for you, for 1 minute so far. |

@@ -49,7 +49,7 @@ struct App {
     inactive: Vec<Saved>,
     /// Lower-case session name to its row tint.
     tints: HashMap<String, u32>,
-    /// Ids of sessions that finished unseen: their dots are red.
+    /// Ids of sessions that finished and were not clicked since: their dots are red.
     unseen: std::collections::HashSet<String>,
     /// The user folder: a session started there shows no folder line.
     home: String,
@@ -222,7 +222,7 @@ const TINTS: [(&str, Option<u32>); 9] = [
     ("Slate", Some(0x64748B)),
 ];
 const ROW: u32 = 0x1C2030;
-/// The row of a session that needs a look (waiting, working, finished unseen): a little brighter
+/// The row of a session that needs a look (waiting, working, just finished): a little brighter
 /// than the resting row, with the same low saturation as the app's panels.
 const ROW_ACTIVE: u32 = 0x30374B;
 const SWATCH: f32 = 26.0;
@@ -449,7 +449,7 @@ fn section(title: &str) -> Build<SkiaLabel> {
 
 /// Idle and closed sessions: the quiet gray.
 const IDLE: u32 = 0x6B7280;
-/// The dot of a session that finished while its terminal tab was not in front, until seen.
+/// The dot of a session that just finished, until its row is clicked or it works again.
 const FINISHED: u32 = 0xEF4444;
 
 fn status_color(status: &str) -> Color {
@@ -470,7 +470,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
         .corner_radius(10)
         .background_color(hex(ROW))
         .observe(move |me, app: &App| {
-            // Brighter while it needs a look: not idle, or finished while you looked elsewhere.
+            // Brighter while it needs a look: not idle, or just finished.
             let active = app.session(pid).is_some_and(|s| s.status != "idle" || app.unseen.contains(&s.id));
             me.set_background_color(row_color(app.tint(&tint), active));
         })

@@ -334,30 +334,6 @@ impl Signals {
     pub fn flash_terminal(&self, _name: &str) -> bool {
         false
     }
-
-    /// The title of the tab the user is looking at: the selected tab of Terminal's front window
-    /// when Terminal is the frontmost app, `None` when it is not. The shared code asks once per
-    /// poll while a dot is red, so this is one script: Terminal says whether it is frontmost
-    /// itself, which keeps the question off System Events and so needs no permission the other
-    /// calls here do not already have.
-    pub fn viewed_tab(&self) -> Option<String> {
-        // Window 1 is Terminal's front window, and a window always has a selected tab; a tab with
-        // no custom title is no more use to the caller than no terminal in front, so both answer
-        // "", and the title keeps its status marker for `tab_is` to match as `tab_layout` does.
-        let title = osascript(
-            r#"if application "Terminal" is not running then return ""
-tell application "Terminal"
-    if not frontmost then return ""
-    if (count of windows) is 0 then return ""
-    try
-        return custom title of selected tab of window 1
-    end try
-    return ""
-end tell"#,
-        )
-        .ok()?;
-        if title.is_empty() { None } else { Some(title) }
-    }
 }
 
 /// Ends what runs in a terminal device: its session leader, which hangs up its children with it.
@@ -637,13 +613,6 @@ mod tests {
         let f: Vec<&str> = one[0].split(FIELD).collect();
         assert_eq!(f[3], "◑ api-server");
         assert!(tab_is(f[3], "api-server"));
-    }
-
-    /// Whatever is in front while this runs, the answer is either no terminal or a named tab;
-    /// an empty title would match every session once the shared code compares it with `tab_is`.
-    #[test]
-    fn the_viewed_tab_is_either_absent_or_named() {
-        assert!(Signals::new().viewed_tab().is_none_or(|t| !t.trim().is_empty()));
     }
 
     #[test]

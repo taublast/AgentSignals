@@ -85,13 +85,10 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
             state::sort_sessions(&mut sessions);
             st.sessions = sessions;
             st.version += 1;
-            // A session that finished while nobody looked at its tab gets a red dot.
-            let viewed = if events.iter().any(|e| e.kind == "finished") { signals.viewed_tab() } else { None };
+            // Every session that finishes gets a red dot, until you click it or it works again.
             for event in events.iter().filter(|e| e.kind == "finished") {
                 if let Some(s) = live.get(&event.pid).filter(|s| !s.id.is_empty()) {
-                    if !viewed.as_deref().is_some_and(|v| state::tab_is(v, &tab_title(s))) {
-                        st.unseen.insert(s.id.clone());
-                    }
+                    st.unseen.insert(s.id.clone());
                 }
             }
             for mut event in events {
@@ -109,7 +106,7 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
                 st.log(event);
             }
         }
-        unseen(&signals, &shared, &live);
+        unseen(&shared, &live);
         // After the list is out: reading the terminals' tab layout can be slow (a permission
         // prompt on macOS), and the window must not wait for it.
         remember(&signals, &shared, &mut memory, &live, first, &mut layout_ids, &mut layout_at);
@@ -117,20 +114,15 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
     }
 }
 
-/// A finished session's red dot goes once its tab is in front, or when it works again or ends.
-/// The tab in front is read only while some dot is red.
-fn unseen(signals: &Signals, shared: &Shared, live: &HashMap<u32, Session>) {
+/// A finished session's red dot goes when it works again or ends (a click on its row clears it too).
+fn unseen(shared: &Shared, live: &HashMap<u32, Session>) {
     let ids: Vec<String> = shared.lock().unwrap().unseen.iter().cloned().collect();
     if ids.is_empty() {
         return;
     }
-    let viewed = signals.viewed_tab();
     let seen: Vec<String> = ids
         .into_iter()
-        .filter(|id| match live.values().find(|s| &s.id == id) {
-            Some(s) => s.status != "idle" || viewed.as_deref().is_some_and(|v| state::tab_is(v, &tab_title(s))),
-            None => true,
-        })
+        .filter(|id| live.values().find(|s| &s.id == id).is_none_or(|s| s.status != "idle"))
         .collect();
     if !seen.is_empty() {
         let mut st = shared.lock().unwrap();
