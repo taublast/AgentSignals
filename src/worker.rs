@@ -398,12 +398,21 @@ fn parse(v: &Value) -> Option<Session> {
     if name.is_empty() {
         name = cwd.rsplit(['\\', '/']).next().unwrap_or("").to_string();
     }
-    let title = if text("nameSource") == "user" { String::new() } else { transcript_title(&cwd, &text("sessionId")) };
+    let mut named = text("nameSource") == "user";
+    let mut title = String::new();
+    if !named {
+        // `/rename` names the session in its transcript, not in this file: that name is the
+        // session's name. A title Claude Code made up (AI title) stays a second line.
+        match transcript_titles(&cwd, &text("sessionId")) {
+            (Some(custom), _) => (name, named) = (custom, true),
+            (None, ai) => title = ai.unwrap_or_default(),
+        }
+    }
     Some(Session {
         pid,
         id: text("sessionId"),
         name,
-        named: text("nameSource") == "user",
+        named,
         // A terminal session is kind `interactive` with entrypoint `cli`; a one-shot `-p` run is
         // also `interactive`, but with entrypoint `sdk-cli`.
         interactive: matches!(text("kind").as_str(), "interactive" | "") && matches!(text("entrypoint").as_str(), "cli" | ""),
@@ -421,14 +430,14 @@ fn parse(v: &Value) -> Option<Session> {
     })
 }
 
-/// The title a session without a name of its own shows in its terminal tab: its custom title
-/// (`/rename`, remote control name), else its AI title. Claude Code appends both to the
-/// transcript again and again, so the last 512 KB hold the current ones.
+/// A session's titles from the end of its transcript: the custom title (`/rename`, which is its
+/// name) and the AI title Claude Code made up. Claude Code appends both again and again, so the
+/// last 512 KB hold the current ones.
 // ponytail: a title older than the last 512 KB is missed; read further back if that shows up.
-fn transcript_title(cwd: &str, session_id: &str) -> String {
+fn transcript_titles(cwd: &str, session_id: &str) -> (Option<String>, Option<String>) {
     use std::io::{Read, Seek, SeekFrom};
     if session_id.is_empty() {
-        return String::new();
+        return (None, None);
     }
     let slug: String = cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
     let path = platform::home_dir()
@@ -436,19 +445,24 @@ fn transcript_title(cwd: &str, session_id: &str) -> String {
         .join("projects")
         .join(slug)
         .join(format!("{session_id}.jsonl"));
-    let Ok(mut file) = std::fs::File::open(path) else { return String::new() };
+    let Ok(mut file) = std::fs::File::open(path) else { return (None, None) };
     let len = file.metadata().map_or(0, |m| m.len());
     let _ = file.seek(SeekFrom::Start(len.saturating_sub(512 * 1024)));
     let mut tail = Vec::new();
     let _ = file.read_to_end(&mut tail);
-    let tail = String::from_utf8_lossy(&tail);
+    titles_in(&String::from_utf8_lossy(&tail))
+}
+
+/// The last custom title and the last AI title in transcript lines; empty ones count as none.
+fn titles_in(tail: &str) -> (Option<String>, Option<String>) {
     let last = |kind: &str, field: &str| {
         tail.lines()
             .rev()
             .filter(|l| l.contains(kind))
             .find_map(|l| serde_json::from_str::<Value>(l).ok()?.get(field)?.as_str().map(str::to_string))
+            .filter(|t| !t.trim().is_empty())
     };
-    last("\"custom-title\"", "customTitle").or_else(|| last("\"ai-title\"", "aiTitle")).unwrap_or_default()
+    (last("\"custom-title\"", "customTitle"), last("\"ai-title\"", "aiTitle"))
 }
 
 #[cfg(test)]
@@ -475,6 +489,23 @@ mod tests {
         // Not a session file.
         assert!(session(r#"{"name":"x"}"#).is_none());
         assert!(session(r#"{"pid":"x"}"#).is_none());
+    }
+
+    #[test]
+    fn transcript_titles() {
+        let lines = [
+            r#"{"type":"ai-title","aiTitle":"Fix login loop"}"#,
+            r#"{"type":"custom-title","customTitle":"old name"}"#,
+            r#"{"type":"user","message":"hi"}"#,
+            r#"{"type":"custom-title","customTitle":"filterscam-mac"}"#,
+            r#"{"type":"ai-title","aiTitle":"Fix login redirect loop"}"#,
+        ]
+        .join("\n");
+        // The newest of each kind wins.
+        assert_eq!(titles_in(&lines), (Some("filterscam-mac".into()), Some("Fix login redirect loop".into())));
+        assert_eq!(titles_in(r#"{"type":"ai-title","aiTitle":"Only AI"}"#), (None, Some("Only AI".into())));
+        assert_eq!(titles_in(r#"{"type":"custom-title","customTitle":"  "}"#), (None, None));
+        assert_eq!(titles_in(""), (None, None));
     }
 
     /// The sessions folder: missing, or holding broken and foreign files.
