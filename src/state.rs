@@ -123,8 +123,6 @@ pub struct State {
     /// Ids of sessions that finished while their terminal tab was not in front: a red dot until
     /// the user looks at that tab, clicks the row, or the session works again.
     pub unseen: std::collections::HashSet<String>,
-    /// This app was in front at the last poll: a click that only brings it forward does not act.
-    pub app_in_front: bool,
 }
 
 /// settings.json: what the user set in the window that is not a rule.

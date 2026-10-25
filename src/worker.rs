@@ -67,7 +67,6 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
             Err(RecvTimeoutError::Disconnected) => return,
         }
         next_poll = Instant::now() + POLL;
-        shared.lock().unwrap().app_in_front = platform::app_in_front();
         let now = state::now_ms();
         let mut new = poll(&dir, &mut files);
         for s in new.values_mut() {

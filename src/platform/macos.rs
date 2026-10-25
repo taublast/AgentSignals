@@ -579,12 +579,6 @@ pub fn no_maximize() {
     });
 }
 
-/// This app is in front. Not done on macOS yet: always true, so a row click always acts there.
-// ponytail: NSApp.isActive on the main thread.
-pub fn app_in_front() -> bool {
-    true
-}
-
 /// Keeps this app's window above all others, or not.
 pub fn set_topmost(on: bool) {
     on_main(move |mtm| {

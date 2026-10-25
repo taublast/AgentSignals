@@ -61,8 +61,6 @@ struct App {
     popup: Option<PopupId>,
     /// The button of the last press on a session row: only the left one focuses its tab.
     button: MouseButton,
-    /// The app was in front when that press began.
-    press_in_front: bool,
     size: Size,
 }
 
@@ -467,14 +465,10 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
         // Every button taps: remember which one pressed.
         .consume_gestures(|_me, app: &mut App, _cx, gesture| {
             app.button = gesture.button;
-            if gesture.kind == GestureKind::Down {
-                app.press_in_front = app.shared.lock().unwrap().app_in_front;
-            }
             false
         })
         .on_tapped(move |_me, app: &mut App, _cx| {
-            // A click that only brought the app forward does not send you away to a terminal.
-            if app.button == MouseButton::Left && app.press_in_front {
+            if app.button == MouseButton::Left {
                 let _ = app.tx.send(Cmd::Focus(focus.clone()));
             }
         })
@@ -546,13 +540,10 @@ fn closed_row(id: String, name: String) -> Build<SkiaShape> {
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .consume_gestures(|_me, app: &mut App, _cx, gesture| {
             app.button = gesture.button;
-            if gesture.kind == GestureKind::Down {
-                app.press_in_front = app.shared.lock().unwrap().app_in_front;
-            }
             false
         })
         .on_tapped(move |_me, app: &mut App, _cx| {
-            if app.button == MouseButton::Left && app.press_in_front {
+            if app.button == MouseButton::Left {
                 let _ = app.tx.send(Cmd::ReopenOne(reopen.clone()));
             }
         })
@@ -690,7 +681,6 @@ pub fn run() {
             menu: None,
             popup: None,
             button: MouseButton::Left,
-            press_in_front: false,
             size: Size::default(),
         };
         Box::new(
