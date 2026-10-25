@@ -178,7 +178,7 @@ else
 fi
 
 # ---------------------------------------------------------------- the zip
-zip="$dist/AgentSignals-$version-macos.zip"
+zip="$dist/AgentSignals-$version-macos-universal.zip"
 rm -f "$zip"
 # ditto keeps the bundle's symlinks and metadata; a plain zip does not.
 ditto -c -k --keepParent "$release" "$zip"
