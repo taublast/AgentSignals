@@ -228,11 +228,11 @@ const ROW_ACTIVE: u32 = 0x262E4A;
 const SWATCH: f32 = 26.0;
 const PALETTE_WIDTH: f32 = 9.0 * SWATCH + 8.0 * 6.0 + 2.0 * 12.0 + 8.0;
 
-/// A session row's background: the resting or the active row, with its tint mixed in (30 %, 38 %
-/// when active) so text stays readable.
+/// A session row's background. Untinted: the active or the resting row. Tinted: the tint mixed into
+/// the resting row, 30 % while active and 15 % at rest, so text stays readable either way.
 fn row_color(tint: Option<u32>, active: bool) -> Color {
-    let (base, amount) = if active { (ROW_ACTIVE, 0.38) } else { (ROW, 0.3) };
-    let Some(t) = tint else { return hex(base) };
+    let Some(t) = tint else { return hex(if active { ROW_ACTIVE } else { ROW }) };
+    let (base, amount) = (ROW, if active { 0.3 } else { 0.15 });
     let mix = |shift: u32| {
         let (row, tint) = (((base >> shift) & 0xFF) as f32, ((t >> shift) & 0xFF) as f32);
         (row + (tint - row) * amount) as u32
