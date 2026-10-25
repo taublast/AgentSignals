@@ -434,12 +434,15 @@ fn section(title: &str) -> Build<SkiaLabel> {
     label(title, 13).text_color(hex(0x9CA3AF)).margin((4, 12, 0, 0))
 }
 
+/// Idle and closed sessions: the quiet gray.
+const IDLE: u32 = 0x6B7280;
+
 fn status_color(status: &str) -> Color {
     match status {
-        // Semaphore: red asks you something, yellow works, dark green is free.
+        // Red asks you something, green works, gray rests (as closed sessions are gray).
         "waiting" => hex(0xEF4444),
-        "busy" => hex(0xFACC15),
-        _ => hex(0x006400), // darkgreen: idle is the quiet state
+        "busy" => hex(0x22C55E),
+        _ => hex(IDLE),
     }
 }
 
@@ -450,13 +453,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
     SkiaShape::new()
         .corner_radius(10)
         .background_color(hex(ROW))
-        .observe(move |me, app: &App| {
-            me.set_background_color(row_color(app.tint(&tint)));
-            // Finished while its tab was not in front: outlined in the idle green until seen.
-            let unseen = app.session(pid).is_some_and(|s| app.unseen.contains(&s.id));
-            me.set_stroke_color(if unseen { hex(0x22C55E) } else { Color::TRANSPARENT });
-        })
-        .stroke_width(2)
+        .observe(move |me, app: &App| me.set_background_color(row_color(app.tint(&tint))))
         .padding((12, 10, 12, 10))
         .fill_x()
         .accessibility_role(Aria::BUTTON)
@@ -477,6 +474,17 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
             true
         })
         .children((
+            // Finished while its tab was not in front: outlined until seen. Its own layer over
+            // the whole row, so showing it moves nothing.
+            SkiaShape::new()
+                .fill()
+                .margin((-12, -10, -12, -10))
+                .corner_radius(10)
+                .stroke_width(2)
+                .observe(move |me, app: &App| {
+                    let unseen = app.session(pid).is_some_and(|s| app.unseen.contains(&s.id));
+                    me.set_stroke_color(if unseen { hex(0x22C55E) } else { Color::TRANSPARENT });
+                }),
             SkiaShape::new()
                 .corner_radius(5)
                 .width_request(10)
@@ -511,7 +519,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                 .vertical_options(LayoutOptions::Center)
                 .observe(move |me, app: &App| {
                     let Some(s) = app.session(pid) else { return };
-                    me.set_text_color(if s.status == "idle" { hex(0x6B7280) } else { status_color(&s.status) });
+                    me.set_text_color(status_color(&s.status));
                     // Idle needs no icon: the green dot says it.
                     let icon = match s.status.as_str() {
                         "busy" => "⚙ ", // no U+FE0F: without text shaping it only adds an empty advance
@@ -550,7 +558,7 @@ fn closed_row(id: String, name: String) -> Build<SkiaShape> {
             true
         })
         .children((
-            SkiaShape::new().corner_radius(5).width_request(10).height_request(10).vertical_options(LayoutOptions::Center).background_color(hex(0x6B7280)),
+            SkiaShape::new().corner_radius(5).width_request(10).height_request(10).vertical_options(LayoutOptions::Center).background_color(hex(IDLE)),
             SkiaStack::new().margin((22, 0, 84, 0)).spacing(2).children((
                 label(&name, 15).text_color(hex(0x9CA3AF)),
                 label("", 12).text_color(hex(0x6B7280)).max_lines(2).observe(move |me, app: &App| {

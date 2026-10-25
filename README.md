@@ -8,7 +8,7 @@ which one is done, which one is waiting for your answer, and which one is still 
 puts all of them in one small window and tells you when something happens, so you stop cycling
 through tabs to find out.
 
-- **See every session at a glance**: red is waiting for you, yellow is working, green is free.
+- **See every session at a glance**: red is waiting for you, green is working, gray is free.
 - **Know when one finishes**: right-click a session and turn on what you want: a spoken
   "api-server finished", a sound, a notification, a flashing taskbar or Dock icon.
 - **Jump to it**: click a session to bring its terminal tab to the front.
@@ -18,7 +18,7 @@ through tabs to find out.
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
 Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
 
-<img src="docs/screenshot.png" alt="Agent Signals: sessions waiting (red), working (yellow) and idle (green) with their signal icons, closed sessions in gray ready to reopen, and recent events" width="420">
+<img src="docs/screenshot.png" alt="Agent Signals: sessions waiting (red), working (green) and idle (gray) with their signal icons, one outlined because it finished unseen, closed sessions ready to reopen, and recent events" width="420">
 
 ## The window
 
@@ -101,9 +101,9 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 | On a row | Meaning |
 |---|---|
 | 🔴 red dot | The session waits for you: a question, a permission dialog. |
-| 🟡 yellow dot | The session is working. |
-| 🟢 dark green dot | The session is idle: it finished and has nothing to do. |
-| ⚪ gray dot, "closed 2h" | The session is closed: its terminal is gone. Click to reopen it. |
+| 🟢 green dot | The session is working. |
+| ⚪ gray dot | The session is idle: it finished and has nothing to do. |
+| ⚪ gray dot, gray name, "closed 2h" | The session is closed: its terminal is gone. Click to reopen it. |
 | green outline | It finished while you were not looking at its terminal tab. It goes when you click the row, switch to its tab, or it starts working again. |
 | ✋ 1m | Waiting for you, for 1 minute so far. |
 | ⚙ 4m | Working, for 4 minutes so far. |
