@@ -450,6 +450,12 @@ fn status_color(status: &str) -> Color {
 }
 
 /// One session: status dot, name, note / what it waits for / folder, status and for how long.
+/// Idle and already seen (gray dot): its text steps back from the white of the sessions that need
+/// you (working, waiting, finished unseen), and closed sessions step back further.
+fn resting(app: &App, pid: u32) -> bool {
+    app.session(pid).is_some_and(|s| s.status == "idle" && !app.unseen.contains(&s.id))
+}
+
 /// Left click: select its terminal tab. Right click / Menu key: copy its name, close it.
 fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
     let (focus, menu, tint) = (name.clone(), name.clone(), name.clone());
@@ -488,11 +494,13 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                 }),
             SkiaStack::new().margin((22, 0, 84, 0)).spacing(2).children((
                 label(&name, 15).text_color(Color::WHITE).observe(move |me, app: &App| {
+                    me.set_text_color(if resting(app, pid) { hex(0xC4C9D1) } else { Color::WHITE });
                     let icons = state::rule_icons(&app.rules, &name);
                     me.set_text(if icons.is_empty() { name.clone() } else { format!("{name}  {icons}") });
                 }),
                 label("", 12).text_color(hex(0x9CA3AF)).max_lines(2).observe(move |me, app: &App| {
                     let Some(s) = app.session(pid) else { return };
+                    me.set_text_color(if resting(app, pid) { hex(0x8B93A1) } else { hex(0x9CA3AF) });
                     let note = app.notes.get(&s.name.to_lowercase()).map_or("", |n| n.as_str());
                     let text = if !note.is_empty() {
                         note.to_string()
