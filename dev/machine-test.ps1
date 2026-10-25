@@ -48,6 +48,7 @@ try {
 
 Push-Location "$PSScriptRoot\.."
 try {
+    $ErrorActionPreference = 'Continue'  # cargo writes progress to stderr; Windows PowerShell would stop on it
     cargo test --release -- --include-ignored 2>&1 | Select-String -Pattern '^test |test result' | Out-Host
     Check ($LASTEXITCODE -eq 0) 'unit tests and the live Windows Terminal test'
 } finally { Pop-Location }
