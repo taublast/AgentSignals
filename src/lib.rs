@@ -52,7 +52,6 @@ struct App {
     /// Ids of sessions that finished and were not clicked since: their dots are red.
     unseen: std::collections::HashSet<String>,
     /// The user folder: a session started there shows no folder line.
-    home: String,
     /// What the rows were built from: rebuilt only when it changes.
     session_key: (Vec<(u32, String)>, Vec<String>),
     root: Handle<SkiaLayout>,
@@ -517,8 +516,6 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                         s.waiting_for.clone()
                     } else if !s.title.is_empty() {
                         s.title.clone()
-                    } else if s.cwd.eq_ignore_ascii_case(&app.home) {
-                        String::new()
                     } else {
                         s.cwd.clone()
                     };
@@ -575,9 +572,8 @@ fn closed_row(id: String, name: String) -> Build<SkiaShape> {
                 label(&name, 15).text_color(hex(0x9CA3AF)),
                 label("", 12).text_color(hex(0x6B7280)).max_lines(2).observe(move |me, app: &App| {
                     let cwd = app.inactive(&folder).map_or("", |s| s.cwd.as_str());
-                    let show = !cwd.eq_ignore_ascii_case(&app.home);
-                    me.set_is_visible(show);
-                    me.set_text(if show { cwd.to_string() } else { String::new() });
+                    me.set_is_visible(!cwd.is_empty());
+                    me.set_text(cwd.to_string());
                 }),
             )),
             label("", 12)
@@ -688,7 +684,6 @@ pub fn run() {
             notes: HashMap::new(),
             muted: false,
             reopen: Vec::new(),
-            home: platform::home_dir().to_string_lossy().into_owned(),
             session_key: (Vec::new(), Vec::new()),
             inactive: Vec::new(),
             tints: HashMap::new(),
