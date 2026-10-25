@@ -43,6 +43,8 @@ struct App {
     reopen: Vec<String>,
     /// Terminal sessions not running now: gray rows, a click reopens one.
     inactive: Vec<Saved>,
+    /// Lower-case session name to its row tint.
+    tints: HashMap<String, u32>,
     /// The user folder: a session started there shows no folder line.
     home: String,
     /// What the rows were built from: rebuilt only when it changes.
@@ -61,6 +63,8 @@ struct Menu {
     name: String,
     /// A closed session's id: the menu offers Reopen and Remove.
     closed: Option<String>,
+    /// Where it was opened: the palette opens there too.
+    at: Point,
     /// "Close session" chosen: the menu asks to confirm.
     confirm: bool,
 }
@@ -72,6 +76,10 @@ impl App {
 
     fn inactive(&self, id: &str) -> Option<&Saved> {
         self.inactive.iter().find(|s| s.id == id)
+    }
+
+    fn tint(&self, name: &str) -> Option<u32> {
+        self.tints.get(&name.to_lowercase()).copied()
     }
 }
 
@@ -165,12 +173,106 @@ fn reopen_banner() -> Build<SkiaShape> {
 /// Opens a session's menu where the right click was, in a popup window of its own: it may reach
 /// past the app window's edges. The engine closes it on a press outside, Escape, or when another
 /// app takes the keyboard; the mouse leaving both windows closes it too.
-fn open_menu(app: &mut App, cx: &mut Cx, menu: Menu, at: Point) {
+fn open_menu(app: &mut App, cx: &mut Cx, menu: Menu) {
+    let at = menu.at;
+    app.menu = Some(menu);
+    show_popup(app, cx, menu_panel(), at);
+}
+
+/// The menu's 🎨 Tint: the palette replaces the menu, at the same place.
+fn open_palette(app: &mut App, cx: &mut Cx) {
+    let Some(at) = app.menu.as_ref().map(|m| m.at) else { return };
+    show_popup(app, cx, palette_panel(), at);
+}
+
+fn show_popup<T: Control + 'static>(app: &mut App, cx: &mut Cx, content: Build<T>, at: Point) {
     if let Some(open) = app.popup.take() {
         cx.close_popup_window(open);
     }
-    app.menu = Some(menu);
-    app.popup = Some(cx.open_popup_window(menu_panel(), at, PopupWindowOptions { close_on_pointer_leave: true, ..Default::default() }));
+    app.popup = Some(cx.open_popup_window(content, at, PopupWindowOptions { close_on_pointer_leave: true, ..Default::default() }));
+}
+
+/// The palette's colors, "None" first, then by hue; every one stays readable under white text.
+const TINTS: [(&str, Option<u32>); 9] = [
+    ("None", None),
+    ("Orange", Some(0xF97316)),
+    ("Amber", Some(0xF59E0B)),
+    ("Green", Some(0x22C55E)),
+    ("Teal", Some(0x14B8A6)),
+    ("Blue", Some(0x3B82F6)),
+    ("Purple", Some(0x8B5CF6)),
+    ("Pink", Some(0xEC4899)),
+    ("Slate", Some(0x64748B)),
+];
+const ROW: u32 = 0x1C2030;
+const SWATCH: f32 = 26.0;
+const PALETTE_WIDTH: f32 = 9.0 * SWATCH + 8.0 * 6.0 + 2.0 * 12.0 + 8.0;
+
+/// A session row's background: the plain row, or its tint mixed into it (30 %) so text stays readable.
+fn row_color(tint: Option<u32>) -> Color {
+    let Some(t) = tint else { return hex(ROW) };
+    let mix = |shift: u32| {
+        let (row, tint) = (((ROW >> shift) & 0xFF) as f32, ((t >> shift) & 0xFF) as f32);
+        (row + (tint - row) * 0.3) as u32
+    };
+    hex(mix(16) << 16 | mix(8) << 8 | mix(0))
+}
+
+/// The tint palette: the session's name, then the colors in one row.
+fn palette_panel() -> Build<SkiaShape> {
+    SkiaShape::new()
+        .corner_radius(8)
+        .background_color(hex(0x262B3B))
+        .stroke_color(hex(0x3B4256))
+        .stroke_width(1.55)
+        .width_request(PALETTE_WIDTH)
+        .padding((4, 4, 4, 4))
+        .children(SkiaStack::new().children((
+            label("", 12).text_color(hex(0x9CA3AF)).max_lines(1).padding((12, 4, 12, 4)).observe(|me, app: &App| {
+                if let Some(m) = &app.menu {
+                    me.set_text(m.name.clone());
+                }
+            }),
+            SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(0x3B4256)),
+            SkiaRow::new()
+                .spacing(6)
+                .padding((12, 6, 12, 10))
+                .accessibility_role(Aria::LIST)
+                .children(TINTS.iter().map(|&(name, color)| swatch(name, color)).collect::<Vec<_>>()),
+        )))
+}
+
+/// One color of the palette; a ring marks the session's current tint, a gray one the color under the mouse.
+fn swatch(name: &'static str, color: Option<u32>) -> Build<SkiaShape> {
+    let ring = move |app: &App, hovered: bool| {
+        let current = app.menu.as_ref().is_some_and(|m| app.tint(&m.name) == color);
+        if current {
+            Color::WHITE
+        } else if hovered {
+            hex(0x9CA3AF)
+        } else {
+            Color::TRANSPARENT
+        }
+    };
+    SkiaShape::new()
+        .corner_radius(SWATCH / 2.0)
+        .width_request(SWATCH)
+        .height_request(SWATCH)
+        .background_color(color.map_or(hex(ROW), hex))
+        .stroke_width(2)
+        .accessibility_role(Aria::MENU_ITEM)
+        .accessibility_label(name)
+        .observe(move |me, app: &App| me.set_stroke_color(ring(app, false)))
+        .on_hovered(move |me, app: &mut App, _cx, on| me.set_stroke_color(ring(app, on)))
+        .on_tapped(move |_me, app: &mut App, cx| {
+            if let Some(m) = app.menu.take() {
+                app.shared.lock().unwrap().set_tint(&m.name, color);
+                sync(app, cx);
+            }
+            menu_done(app, cx);
+        })
+        // "None" is the plain row with a cross on it.
+        .children((label(if color.is_none() { "✕" } else { "" }, 12).text_color(hex(0x9CA3AF)).horizontal_options(LayoutOptions::Center).vertical_options(LayoutOptions::Center),))
 }
 
 /// After a menu action: an action that is done with the menu (took `app.menu`) closes its popup.
@@ -213,6 +315,7 @@ fn menu_panel() -> Build<SkiaShape> {
                     signal_item(Signal::Sound),
                     signal_item(Signal::Toast),
                     signal_item(Signal::Flash),
+                    menu_item("🎨", "Tint", open_palette),
                     menu_item("❌", "Close session", |app, _cx| {
                         if let Some(m) = &mut app.menu {
                             m.confirm = true;
@@ -231,6 +334,7 @@ fn menu_panel() -> Build<SkiaShape> {
                             let _ = app.tx.send(Cmd::ReopenOne(id));
                         }
                     }),
+                    menu_item("🎨", "Tint", open_palette),
                     menu_item("🗑", "Remove", |app, _cx| {
                         if let Some(id) = app.menu.take().and_then(|m| m.closed) {
                             let _ = app.tx.send(Cmd::Forget(id));
@@ -333,10 +437,11 @@ fn status_color(status: &str) -> Color {
 /// One session: status dot, name, note / what it waits for / folder, status and for how long.
 /// Left click: select its terminal tab. Right click / Menu key: copy its name, close it.
 fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
-    let (focus, menu) = (name.clone(), name.clone());
+    let (focus, menu, tint) = (name.clone(), name.clone(), name.clone());
     SkiaShape::new()
         .corner_radius(10)
-        .background_color(hex(0x1C2030))
+        .background_color(hex(ROW))
+        .observe(move |me, app: &App| me.set_background_color(row_color(app.tint(&tint))))
         .padding((12, 10, 12, 10))
         .fill_x()
         .accessibility_role(Aria::BUTTON)
@@ -353,7 +458,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
             }
         })
         .on_context_menu(move |_me, app: &mut App, cx, at| {
-            open_menu(app, cx, Menu { name: menu.clone(), closed: None, confirm: false }, at.location);
+            open_menu(app, cx, Menu { name: menu.clone(), closed: None, at: at.location, confirm: false });
             true
         })
         .children((
@@ -405,10 +510,11 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
 
 /// A terminal session that is not running: gray, a click reopens it in a terminal tab.
 fn closed_row(id: String, name: String) -> Build<SkiaShape> {
-    let (reopen, menu, folder) = (id.clone(), id.clone(), id.clone());
+    let (reopen, menu, folder, tint) = (id.clone(), id.clone(), id.clone(), name.clone());
     SkiaShape::new()
         .corner_radius(10)
-        .background_color(hex(0x1C2030))
+        .background_color(hex(ROW))
+        .observe(move |me, app: &App| me.set_background_color(row_color(app.tint(&tint))))
         .padding((12, 10, 12, 10))
         .fill_x()
         .accessibility_role(Aria::BUTTON)
@@ -425,7 +531,7 @@ fn closed_row(id: String, name: String) -> Build<SkiaShape> {
         })
         .on_context_menu(move |_me, app: &mut App, cx, at| {
             let name = app.inactive(&menu).map_or(String::new(), |s| s.label.clone());
-            open_menu(app, cx, Menu { name, closed: Some(menu.clone()), confirm: false }, at.location);
+            open_menu(app, cx, Menu { name, closed: Some(menu.clone()), at: at.location, confirm: false });
             true
         })
         .children((
@@ -488,6 +594,7 @@ fn sync(app: &mut App, cx: &mut Cx) {
         app.muted = st.muted;
         app.reopen = st.reopen.iter().map(|s| s.label.clone()).collect();
         app.inactive = st.inactive.clone();
+        app.tints = st.tints.clone();
         drop(st);
         let key = (
             app.sessions.iter().map(|s| (s.pid, s.name.clone())).collect::<Vec<_>>(),
@@ -548,6 +655,7 @@ pub fn run() {
             home: platform::home_dir().to_string_lossy().into_owned(),
             session_key: (Vec::new(), Vec::new()),
             inactive: Vec::new(),
+            tints: HashMap::new(),
             root: Handle::default(),
             session_stack: Handle::default(),
             menu: None,

@@ -72,12 +72,15 @@ with the one that finished last on top, then closed with the one closed last on 
   - **⚡ Flash taskbar when finished**: on Windows the session's terminal window flashes on the
     taskbar until you switch to it (taskbar buttons are usually grouped, so the Windows Terminal
     button flashes: hover it to see which window). On macOS Agent Signals' own Dock icon bounces.
+  - **🎨 Tint**: opens a palette next to the menu; the color you pick tints the session's row (None
+    takes it off). Tints are kept by session name, so a reopened session or a new one with the same
+    name gets it back.
   - **❌ Close session**: closes its terminal tab after you confirm. Claude ends there; the session
     stays in the list, gray, and a click reopens it.
 
   Each signal item turns into "Stop ..." once it is on; choose it again to turn it off.
 
-  On a closed session the menu has **📋 Copy name**, **🔄 Reopen** and **🗑 Remove** (takes it off the list;
+  On a closed session the menu has **📋 Copy name**, **🔄 Reopen**, **🎨 Tint** and **🗑 Remove** (takes it off the list;
   the conversation itself stays, `claude --resume` still finds it).
 
 **Closed sessions** stay in the list when you close their terminal, until you remove them. Only
@@ -253,6 +256,8 @@ Optional, for Claude agents and scripts: `http://127.0.0.1:47801`; `GET /` print
 | `DELETE /rules/<id>` | | |
 | `POST /signal` | `{sound?, say?, toast?, title?, flash?, raise?, session?}` | signal now |
 | `POST /note` | `{session, text}` | a line under the session (empty clears) |
+| `GET /tints` | | session rows' tint colors |
+| `POST /tint` | `{session, color}` | tint the session's row, `color` as `#RRGGBB` (empty clears) |
 | `POST /focus` | `{session}` | select its terminal tab |
 | `GET /events` | | last 50 events and what fired |
 | `GET /sounds` | | playable sound names |
@@ -293,7 +298,7 @@ Localhost only, no authentication: any local process can make it beep.
 - Reads `~/.claude/sessions/*.json` (Claude Code's list of live sessions) and, from
   each session's transcript, its first lines (start folder), its last lines (permission mode) and,
   for a session without a name of its own, its title.
-- Writes `rules.json`, `sessions.json` (the terminal sessions; closed ones stay until you remove
+- Writes `rules.json`, `settings.json` (row tints), `sessions.json` (the terminal sessions; closed ones stay until you remove
   them) and, after a crash, `crash.log` in its folder (`%APPDATA%\AgentSignals` on Windows,
   `~/Library/Application Support/AgentSignals` on macOS). On Windows it registers the notification
   AUMID under `HKCU\Software\Classes\AppUserModelId\AgentSignals`.

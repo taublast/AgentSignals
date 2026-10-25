@@ -65,6 +65,8 @@ curl -s http://127.0.0.1:47801/rules -d '{"session":"api-server","on":"finished"
   `text` clears it.
 - `POST /focus {session}` selects that session's terminal tab (Windows Terminal, or Terminal.app on macOS). Only when the user asks: it
   changes what they are looking at.
+- Tint a session's row: `POST /tint {session:"<name>", color:"#3B82F6"}`; empty `color` clears it,
+  `GET /tints` lists them. Only when the user asks.
 - `GET /events`: the last 50 status changes and what fired. Read it to check a rule worked.
 
 ## Manners

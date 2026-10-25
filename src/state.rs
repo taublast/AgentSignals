@@ -118,12 +118,49 @@ pub struct State {
     pub reopen: Vec<crate::restore::Saved>,
     /// Remembered terminal sessions not running now (closed, or closed by a reboot), last closed first.
     pub inactive: Vec<crate::restore::Saved>,
+    /// Lower-case session name to the color its row is tinted with (0xRRGGBB); in settings.json.
+    pub tints: HashMap<String, u32>,
+}
+
+/// settings.json: what the user set in the window that is not a rule.
+#[derive(Default, Serialize, Deserialize)]
+struct Settings {
+    /// Session name to "#RRGGBB".
+    #[serde(default)]
+    tints: std::collections::BTreeMap<String, String>,
+}
+
+/// "#RRGGBB" (or "RRGGBB") to 0xRRGGBB.
+pub fn parse_color(text: &str) -> Option<u32> {
+    let hex = text.trim().trim_start_matches('#');
+    (hex.len() == 6).then(|| u32::from_str_radix(hex, 16).ok()).flatten()
+}
+
+pub fn color_text(rgb: u32) -> String {
+    format!("#{rgb:06X}")
 }
 
 impl State {
     pub fn load() -> State {
         let rules: Vec<Rule> = std::fs::read(rules_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        State { rules, ..State::default() }
+        let settings: Settings = std::fs::read(settings_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let tints = settings.tints.iter().filter_map(|(name, c)| Some((name.to_lowercase(), parse_color(c)?))).collect();
+        State { rules, tints, ..State::default() }
+    }
+
+    /// Tints a session's row (`None`: back to the plain row) and saves it.
+    pub fn set_tint(&mut self, name: &str, color: Option<u32>) {
+        match color {
+            Some(c) => self.tints.insert(name.to_lowercase(), c),
+            None => self.tints.remove(&name.to_lowercase()),
+        };
+        self.version += 1;
+        let settings = Settings { tints: self.tints.iter().map(|(n, c)| (n.clone(), color_text(*c))).collect() };
+        let path = settings_path();
+        let _ = std::fs::create_dir_all(path.parent().unwrap());
+        if let Err(e) = std::fs::write(&path, serde_json::to_vec_pretty(&settings).unwrap()) {
+            eprintln!("saving {}: {e}", path.display());
+        }
     }
 
     pub fn add_rule(&mut self, mut rule: Rule) -> u32 {
@@ -177,6 +214,10 @@ pub fn data_dir() -> PathBuf {
 
 fn rules_path() -> PathBuf {
     data_dir().join("rules.json")
+}
+
+fn settings_path() -> PathBuf {
+    data_dir().join("settings.json")
 }
 
 /// A terminal tab title is `<marker> <session name>` (`✳ idle`, `◐ busy`...).

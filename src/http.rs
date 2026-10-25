@@ -1,6 +1,6 @@
 //! The API agents call: plain HTTP on 127.0.0.1, JSON in and out, one request at a time.
 
-use crate::state::{Action, EVENTS, Rule, Shared};
+use crate::state::{self, Action, EVENTS, Rule, Shared};
 use crate::worker::{self, Cmd};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -18,6 +18,8 @@ POST   /rules           {session: name or \"*\", on: finished|waiting|started|cl
 DELETE /rules/<id>      remove a rule
 POST   /signal          {sound?, say?, toast?, title?, flash?, raise?, session?}  signal now
 POST   /note            {session, text}  a line shown under the session (empty text clears)
+GET    /tints           session rows' tint colors
+POST   /tint            {session, color: \"#RRGGBB\"}  tint the session's row (empty color clears)
 POST   /focus           {session}  select its terminal tab
 GET    /events          last 50 status changes and what fired
 GET    /sounds          playable sound names
@@ -105,6 +107,14 @@ struct Target {
 }
 
 #[derive(Deserialize)]
+struct Tint {
+    session: String,
+    /// "#RRGGBB"; empty or missing clears the tint.
+    #[serde(default)]
+    color: String,
+}
+
+#[derive(Deserialize)]
 struct SignalIn {
     #[serde(flatten)]
     action: Action,
@@ -155,6 +165,18 @@ fn route(method: &str, path: &str, body: &[u8], shared: &Shared, tx: &Sender<Cmd
             }
             Ok(s) => {
                 let _ = tx.send(Cmd::Signal(s.action, s.session));
+                ok
+            }
+        },
+        ("GET", "/tints") => {
+            let st = shared.lock().unwrap();
+            ("200 OK", json!(st.tints.iter().map(|(n, c)| (n.clone(), state::color_text(*c))).collect::<std::collections::BTreeMap<_, _>>()))
+        }
+        ("POST", "/tint") => match parse(body).and_then(serde_json::from_value::<Tint>) {
+            Err(e) => bad(e.to_string()),
+            Ok(t) if !t.color.is_empty() && state::parse_color(&t.color).is_none() => bad(format!("color must be #RRGGBB, got {}", t.color)),
+            Ok(t) => {
+                shared.lock().unwrap().set_tint(&t.session, state::parse_color(&t.color));
                 ok
             }
         },
