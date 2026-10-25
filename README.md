@@ -143,10 +143,11 @@ permissions it asks for.
 [Releases](https://github.com/taublast/AgentSignals/releases) have both downloads. Prefer to build
 it yourself? Read on.
 
-**Windows**: `agentsignals.exe`, one file, no installer, run it from any folder. It is not
+**Windows**: `agentsignals-<version>-windows-x64.exe` (most PCs) or `-windows-arm64.exe` (ARM
+laptops such as Snapdragon), one file, no installer, run it from any folder. It is not
 code-signed, so Windows SmartScreen asks once: **More info**, then **Run anyway**.
 
-**Mac**: `AgentSignals-<version>-macos.zip`, a universal build for Apple silicon and Intel. Unzip
+**Mac**: `AgentSignals-<version>-macos-universal.zip`, one build for Apple silicon and Intel. Unzip
 it and move **Agent Signals.app** to Applications. It is signed and notarized, so it opens with no
 warning; the first time it needs something, macOS asks for notifications and for permission to
 control Terminal (see [macOS](#macos)).
@@ -171,10 +172,12 @@ On Windows as below; on macOS see [macOS](#macos).
    ```
    The first build takes a few minutes: it downloads Skia prebuilt for the drawnui crate. Later
    builds take seconds. Starting it a second time flashes the running one instead.
-3. For a release file: `dev\release.ps1` builds `target\dist\release\agentsignals.exe` with local
-   folder paths remapped out of the binary, and fails if any is left.
+3. For the release files: `dev\release.ps1` builds `target\dist\agentsignals-<version>-windows-x64.exe`
+   and `-arm64.exe` with local folder paths remapped out of the binary, and fails if any is left.
+   ARM64 is cross-built and needs Visual Studio's "MSVC ARM64 build tools"
+   (`dev\release.ps1 -Arch x64` builds x64 only).
 4. To check a build the way a new machine meets it, with the app closed: `dev\machine-test.ps1`
-   (or `dev\machine-test.ps1 target\dist\release\agentsignals.exe`). It starts the app on a fresh
+   (or `dev\machine-test.ps1 target\dist\agentsignals-<version>-windows-x64.exe`). It starts the app on a fresh
    empty profile, starts it twice, starts it while another program holds its port (an error
    message must show), then runs the unit tests and a live Windows Terminal test that opens one tab
    and closes it.
