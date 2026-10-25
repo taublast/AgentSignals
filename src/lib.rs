@@ -61,10 +61,6 @@ struct App {
     popup: Option<PopupId>,
     /// The button of the last press on a session row: only the left one focuses its tab.
     button: MouseButton,
-    /// When the window last got the keyboard (`None` while it does not have it).
-    focused_at: Option<std::time::Instant>,
-    /// That press acts: it was not the click that brought the window forward.
-    press_acts: bool,
     size: Size,
 }
 
@@ -454,12 +450,6 @@ fn status_color(status: &str) -> Color {
 }
 
 /// One session: status dot, name, note / what it waits for / folder, status and for how long.
-/// A press acts unless it is the click that brought the window forward: the engine reports the
-/// focus before that click's press, so a press right after the window got the keyboard is that click.
-fn press_acts(app: &App, cx: &Cx) -> bool {
-    cx.window_focused() && app.focused_at.is_none_or(|at| at.elapsed() > std::time::Duration::from_millis(250))
-}
-
 /// Left click: select its terminal tab. Right click / Menu key: copy its name, close it.
 fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
     let (focus, menu, tint) = (name.clone(), name.clone(), name.clone());
@@ -473,16 +463,12 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
         .accessibility_label(name.clone())
         .animation_tapped(SkiaTouchAnimation::Ripple)
         // Every button taps: remember which one pressed.
-        .consume_gestures(|_me, app: &mut App, cx, gesture| {
+        .consume_gestures(|_me, app: &mut App, _cx, gesture| {
             app.button = gesture.button;
-            if gesture.kind == GestureKind::Down {
-                app.press_acts = press_acts(app, cx);
-            }
             false
         })
         .on_tapped(move |_me, app: &mut App, _cx| {
-            // A click that only brought the app forward does not send you away to a terminal.
-            if app.button == MouseButton::Left && app.press_acts {
+            if app.button == MouseButton::Left {
                 let _ = app.tx.send(Cmd::Focus(focus.clone()));
             }
         })
@@ -552,15 +538,12 @@ fn closed_row(id: String, name: String) -> Build<SkiaShape> {
         .accessibility_role(Aria::BUTTON)
         .accessibility_label(format!("{name}, closed, reopen"))
         .animation_tapped(SkiaTouchAnimation::Ripple)
-        .consume_gestures(|_me, app: &mut App, cx, gesture| {
+        .consume_gestures(|_me, app: &mut App, _cx, gesture| {
             app.button = gesture.button;
-            if gesture.kind == GestureKind::Down {
-                app.press_acts = press_acts(app, cx);
-            }
             false
         })
         .on_tapped(move |_me, app: &mut App, _cx| {
-            if app.button == MouseButton::Left && app.press_acts {
+            if app.button == MouseButton::Left {
                 let _ = app.tx.send(Cmd::ReopenOne(reopen.clone()));
             }
         })
@@ -698,17 +681,12 @@ pub fn run() {
             menu: None,
             popup: None,
             button: MouseButton::Left,
-            focused_at: None,
-            press_acts: true,
             size: Size::default(),
         };
         Box::new(
             Ui::new(app, build)
                 .font_bytes("Default", include_bytes!("../assets/OpenSans-Regular.ttf"))
                 .background(hex(0x12141C))
-                .on_window_focus(|app: &mut App, focused, _cx| {
-                    app.focused_at = focused.then(std::time::Instant::now);
-                })
                 .on_canvas_resized(|app, size, cx| {
                     app.size = size;
                     if !std::mem::replace(&mut app.ticking, true) {
