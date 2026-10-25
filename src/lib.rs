@@ -223,8 +223,8 @@ const TINTS: [(&str, Option<u32>); 9] = [
 ];
 const ROW: u32 = 0x1C2030;
 /// The row of a session that needs a look (waiting, working, finished unseen): a little brighter
-/// than the resting row, the menu panel's color.
-const ROW_ACTIVE: u32 = 0x262B3B;
+/// than the resting row, with the same low saturation as the app's panels.
+const ROW_ACTIVE: u32 = 0x30374B;
 const SWATCH: f32 = 26.0;
 const PALETTE_WIDTH: f32 = 9.0 * SWATCH + 8.0 * 6.0 + 2.0 * 12.0 + 8.0;
 
