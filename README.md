@@ -90,8 +90,7 @@ before its first message has nothing to reopen).
 
 **Finished while you looked elsewhere**: a session that finishes while its terminal tab is not the one
 in front gets a red dot, so you see what is new. It turns gray when you click the row, switch to its
-tab yourself, or the session starts working again (on macOS, for now, only the click and new work
-clear it).
+tab yourself, or the session starts working again.
 
 **Recent**: the last status changes ("frontend finished after 17m") and which signals they gave.
 

@@ -335,11 +335,28 @@ impl Signals {
         false
     }
 
-    /// The title of the tab the user is looking at. Not done on macOS yet: `None` = nothing is
-    /// being looked at, so every session that finishes keeps its red dot until it is clicked.
-    // ponytail: the selected tab of Terminal's front window when Terminal is the frontmost app.
+    /// The title of the tab the user is looking at: the selected tab of Terminal's front window
+    /// when Terminal is the frontmost app, `None` when it is not. The shared code asks once per
+    /// poll while a dot is red, so this is one script: Terminal says whether it is frontmost
+    /// itself, which keeps the question off System Events and so needs no permission the other
+    /// calls here do not already have.
     pub fn viewed_tab(&self) -> Option<String> {
-        None
+        // Window 1 is Terminal's front window, and a window always has a selected tab; a tab with
+        // no custom title is no more use to the caller than no terminal in front, so both answer
+        // "", and the title keeps its status marker for `tab_is` to match as `tab_layout` does.
+        let title = osascript(
+            r#"if application "Terminal" is not running then return ""
+tell application "Terminal"
+    if not frontmost then return ""
+    if (count of windows) is 0 then return ""
+    try
+        return custom title of selected tab of window 1
+    end try
+    return ""
+end tell"#,
+        )
+        .ok()?;
+        if title.is_empty() { None } else { Some(title) }
     }
 }
 
@@ -499,7 +516,7 @@ mod notify {
 // -------------------------------------------------------------- this app's window
 
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSApplication, NSRequestUserAttentionType, NSWindow, NSWindowLevel};
+use objc2_app_kit::{NSApplication, NSRequestUserAttentionType, NSWindow, NSWindowButton, NSWindowCollectionBehavior, NSWindowLevel};
 
 /// Runs `work` on the main thread, where AppKit has to be used. The worker thread asks for these,
 /// and the main thread is inside the engine's event loop, which drains the main queue.
@@ -543,9 +560,24 @@ pub fn raise_app() {
     });
 }
 
-/// No maximizing (the green zoom button). Not done on macOS yet.
-// ponytail: disable the window's standardWindowButton(ZoomButton) on the main thread, as set_topmost does.
-pub fn no_maximize() {}
+/// Takes maximizing away from this app's window: the green button is disabled, and full screen is
+/// refused so that the button has nothing else to offer. What is left is the zoom action, which
+/// the button also carries: Option and the green button asks for it, and so does a title bar
+/// double-click. Dragging to the top of the screen is macOS window tiling, not maximizing, and is
+/// left alone.
+pub fn no_maximize() {
+    on_main(|mtm| {
+        let Some(window) = own_window(mtm) else { return };
+        // Full screen counts as maximizing. Keep whatever else the behaviour holds: the window is
+        // not this app's to configure beyond the one thing being taken away.
+        let keep = window.collectionBehavior()
+            & !(NSWindowCollectionBehavior::FullScreenPrimary | NSWindowCollectionBehavior::FullScreenAuxiliary);
+        window.setCollectionBehavior(keep | NSWindowCollectionBehavior::FullScreenNone);
+        if let Some(zoom) = window.standardWindowButton(NSWindowButton::ZoomButton) {
+            zoom.setEnabled(false);
+        }
+    });
+}
 
 /// Keeps this app's window above all others, or not.
 pub fn set_topmost(on: bool) {
@@ -605,6 +637,13 @@ mod tests {
         let f: Vec<&str> = one[0].split(FIELD).collect();
         assert_eq!(f[3], "◑ api-server");
         assert!(tab_is(f[3], "api-server"));
+    }
+
+    /// Whatever is in front while this runs, the answer is either no terminal or a named tab;
+    /// an empty title would match every session once the shared code compares it with `tab_is`.
+    #[test]
+    fn the_viewed_tab_is_either_absent_or_named() {
+        assert!(Signals::new().viewed_tab().is_none_or(|t| !t.trim().is_empty()));
     }
 
     #[test]
