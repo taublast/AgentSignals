@@ -5,7 +5,8 @@
 # PDB is referenced by file name only. The check after each build fails if a local path is left.
 # ARM64 is cross-built: it needs `rustup target add aarch64-pc-windows-msvc` and Visual Studio's
 # "MSVC ARM64 build tools"; it cannot be run on an x64 machine.
-# Usage: develease.ps1 [-Arch x64,arm64] (both by default).
+# Usage: dev\release.ps1 [-Arch x64,arm64] (both by default).
+elease.ps1 [-Arch x64,arm64] (both by default).
 param([string[]]$Arch = @('x64', 'arm64'))
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot\..").Path
