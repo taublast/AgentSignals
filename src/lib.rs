@@ -223,16 +223,16 @@ const TINTS: [(&str, Option<u32>); 9] = [
 ];
 const ROW: u32 = 0x1C2030;
 /// The row of a session that needs a look (waiting, working, finished unseen): a little brighter
-/// and bluer than the resting row.
-const ROW_ACTIVE: u32 = 0x262E4A;
+/// than the resting row, the menu panel's color.
+const ROW_ACTIVE: u32 = 0x262B3B;
 const SWATCH: f32 = 26.0;
 const PALETTE_WIDTH: f32 = 9.0 * SWATCH + 8.0 * 6.0 + 2.0 * 12.0 + 8.0;
 
-/// A session row's background. Untinted: the active or the resting row. Tinted: the tint mixed into
-/// the resting row, 30 % while active and 15 % at rest, so text stays readable either way.
+/// A session row's background: the active or the resting row, with its tint mixed in, 30 % while
+/// active and 10 % at rest, so text stays readable either way.
 fn row_color(tint: Option<u32>, active: bool) -> Color {
-    let Some(t) = tint else { return hex(if active { ROW_ACTIVE } else { ROW }) };
-    let (base, amount) = (ROW, if active { 0.3 } else { 0.15 });
+    let (base, amount) = if active { (ROW_ACTIVE, 0.3) } else { (ROW, 0.1) };
+    let Some(t) = tint else { return hex(base) };
     let mix = |shift: u32| {
         let (row, tint) = (((base >> shift) & 0xFF) as f32, ((t >> shift) & 0xFF) as f32);
         (row + (tint - row) * amount) as u32
