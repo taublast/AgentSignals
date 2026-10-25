@@ -299,6 +299,13 @@ fn own_window() -> Option<HWND> {
     found
 }
 
+/// This app is in front: the foreground window is one of its own (its window or a popup).
+pub fn app_in_front() -> bool {
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut pid)) };
+    pid == unsafe { GetCurrentProcessId() }
+}
+
 /// Flashes this app's taskbar button.
 pub fn flash_app() {
     if let Some(hwnd) = own_window() {
