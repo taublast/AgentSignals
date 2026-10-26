@@ -147,7 +147,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentsignals"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "block2 0.6.2",
  "dispatch2",
@@ -737,9 +737,9 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "drawnui"
-version = "0.1.0-preview.14"
+version = "0.1.0-preview.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abaa7b6d901367b60425c14bc16321a525405d6a7e7ff4cf63c6303cba1582fc"
+checksum = "0d1b1b300b0ca551f43539c4a81524ef24ca5f2ecba719217adeaf80406fe31c"
 dependencies = [
  "accesskit",
  "accesskit_winit",
