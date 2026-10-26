@@ -392,6 +392,10 @@ fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Option<Session>
 
 fn parse(v: &Value) -> Option<Session> {
     let pid = v.get("pid")?.as_u64()? as u32;
+    // A spare is a background process Claude Code keeps ready for the next job, not a session yet.
+    if v.get("spare").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
     let text = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let cwd = text("cwd");
     let mut name = text("name");
@@ -481,6 +485,7 @@ mod tests {
         assert_eq!((s.name.as_str(), s.status.as_str(), s.since_ms), ("api", "busy", 5));
         // A background job and a one-shot `-p` run are listed, never remembered for reopening.
         assert!(!session(r#"{"pid":2,"sessionId":"b","kind":"bg","entrypoint":"cli","name":"job"}"#).unwrap().interactive);
+        assert!(session(r#"{"pid":4,"sessionId":"d","kind":"bg","entrypoint":"cli","name":"d","spare":true}"#).is_none());
         assert!(!session(r#"{"pid":3,"sessionId":"c","kind":"interactive","entrypoint":"sdk-cli"}"#).unwrap().interactive);
         // An older file: no kind, entrypoint, name or status.
         let old = session(r#"{"pid":4,"sessionId":"d","cwd":"C:\\Work\\shop"}"#).unwrap();
