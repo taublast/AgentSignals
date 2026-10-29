@@ -12,7 +12,8 @@ through tabs to find out.
   finished, gray is free.
 - **Know when one finishes**: right-click a session and turn on what you want: a spoken
   "api-server finished", a sound, a notification, a flashing taskbar or Dock icon.
-- **Jump to it**: click a session to bring its terminal tab to the front.
+- **Jump to it**: click a session to bring its terminal tab to the front, or its VS Code window
+  for a session in VS Code's Claude Code panel.
 - **Get them back after a reboot**: one click reopens every session that was open, with its
   conversation, in its terminal.
 
@@ -64,7 +65,8 @@ unseen) are a little brighter than idle and closed ones. In this order: waiting 
 with the one that finished last on top, then closed with the one closed last on top.
 
 - **Click** a row: its terminal tab comes to the front. Click a closed (gray) row and it opens
-  again in the terminal, with its conversation.
+  again in the terminal, with its conversation. A row with a **VS** chip is a session in VS Code's
+  Claude Code panel: a click brings that VS Code window to the front.
 - **Right-click** a row (or the Menu key):
   - **📋 Copy name**: the session's name, to paste into a message to it or to another agent.
   - **🔊 Announce when finished**: the app says "<name> finished" every time it finishes.
@@ -78,7 +80,7 @@ with the one that finished last on top, then closed with the one closed last on 
     takes it off). Tints are kept by session name, so a reopened session or a new one with the same
     name gets it back.
   - **❌ Close session**: closes its terminal tab after you confirm. Claude ends there; the session
-    stays in the list, gray, and a click reopens it.
+    stays in the list, gray, and a click reopens it. Sessions in VS Code are closed in VS Code.
 
   Each signal item turns into "Stop ..." once it is on; choose it again to turn it off.
 
@@ -105,6 +107,7 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 | 🔴 red dot | It just finished and you have not clicked it yet: new for you. |
 | ⚪ gray dot | The session is idle: it finished and has nothing to do. |
 | ⚪ gray dot, gray name, "closed 2h" | The session is closed: its terminal is gone. Click to reopen it. |
+| **VS** chip | The session runs in VS Code's Claude Code panel, not in a terminal. |
 | ✋ 1m | Waiting for you, for 1 minute so far. |
 | ⚙ 4m | Working, for 4 minutes so far. |
 | 18m (no icon) | Idle, finished 18 minutes ago. |
@@ -267,7 +270,7 @@ Optional, for Claude agents and scripts: `http://127.0.0.1:47801`; `GET /` print
 | `POST /note` | `{session, text}` | a line under the session (empty clears) |
 | `GET /tints` | | session rows' tint colors |
 | `POST /tint` | `{session, color}` | tint the session's row, `color` as `#RRGGBB` (empty clears) |
-| `POST /focus` | `{session}` | select its terminal tab |
+| `POST /focus` | `{session}` | select its terminal tab (a VS Code session: its VS Code window) |
 | `GET /events` | | last 50 events and what fired |
 | `GET /sounds` | | playable sound names |
 

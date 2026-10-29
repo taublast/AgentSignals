@@ -337,10 +337,15 @@ fn menu_panel() -> Build<SkiaShape> {
                     signal_item(Signal::Toast),
                     signal_item(Signal::Flash),
                     menu_item("🎨", "Tint", open_palette),
+                    // A terminal tab only: a VS Code panel is closed in VS Code.
                     menu_item("❌", "Close session", |app, _cx| {
                         if let Some(m) = &mut app.menu {
                             m.confirm = true;
                         }
+                    })
+                    .observe(|me, app: &App| {
+                        let vscode = app.menu.as_ref().is_some_and(|m| app.sessions.iter().any(|s| s.vscode && s.name == m.name));
+                        me.set_is_visible(!vscode);
                     }),
                 )),
                 // A closed session.
