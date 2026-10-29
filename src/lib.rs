@@ -520,7 +520,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                         .padding((5, 1, 5, 1))
                         .vertical_options(LayoutOptions::Center)
                         .observe(move |me, app: &App| me.set_is_visible(app.session(pid).is_some_and(|s| s.vscode)))
-                        .children((label("VS", 10).text_color(hex(0xC9CDD4)),)),
+                        .children((label("VSC", 10).text_color(hex(0xC9CDD4)),)),
                 )),
                 label("", 12).text_color(hex(0x9CA3AF)).max_lines(2).observe(move |me, app: &App| {
                     let Some(s) = app.session(pid) else { return };

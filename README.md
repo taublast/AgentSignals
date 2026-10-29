@@ -65,7 +65,7 @@ unseen) are a little brighter than idle and closed ones. In this order: waiting 
 with the one that finished last on top, then closed with the one closed last on top.
 
 - **Click** a row: its terminal tab comes to the front. Click a closed (gray) row and it opens
-  again in the terminal, with its conversation. A row with a **VS** chip is a session in VS Code's
+  again in the terminal, with its conversation. A row with a **VSC** chip is a session in VS Code's
   Claude Code panel: a click brings that VS Code window to the front.
 - **Right-click** a row (or the Menu key):
   - **📋 Copy name**: the session's name, to paste into a message to it or to another agent.
@@ -107,7 +107,7 @@ The list scrolls when it is longer than the window; the bar on the right shows w
 | 🔴 red dot | It just finished and you have not clicked it yet: new for you. |
 | ⚪ gray dot | The session is idle: it finished and has nothing to do. |
 | ⚪ gray dot, gray name, "closed 2h" | The session is closed: its terminal is gone. Click to reopen it. |
-| **VS** chip | The session runs in VS Code's Claude Code panel, not in a terminal. |
+| **VSC** chip | The session runs in VS Code's Claude Code panel, not in a terminal. |
 | ✋ 1m | Waiting for you, for 1 minute so far. |
 | ⚙ 4m | Working, for 4 minutes so far. |
 | 18m (no icon) | Idle, finished 18 minutes ago. |
