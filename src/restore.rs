@@ -343,7 +343,7 @@ mod tests {
             gone: HashMap::new(),
             reopening: HashMap::new(),
         };
-        let live = [Session { pid: 1, id: "live".into(), name: "live".into(), named: true, interactive: true, title: String::new(), status: "idle".into(), waiting_for: String::new(), cwd: String::new(), since_ms: 0 }];
+        let live = [Session { pid: 1, id: "live".into(), name: "live".into(), named: true, interactive: true, vscode: false, title: String::new(), status: "idle".into(), waiting_for: String::new(), cwd: String::new(), since_ms: 0 }];
         // Open when the app last saw it (a reboot closed it) first, then the last closed.
         let ids: Vec<String> = memory.inactive(&live).into_iter().map(|s| s.id).collect();
         assert_eq!(ids, ["b", "c", "a"]);

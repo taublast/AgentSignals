@@ -1,7 +1,7 @@
 //! Windows: voice and sounds (SAPI), toasts, taskbar flash, window raise / topmost, Windows
 //! Terminal tabs (UI Automation; opened with `wt`), process liveness, folders.
 
-use crate::state::tab_is;
+use crate::state::{editor_title_is, tab_is};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use windows::Data::Xml::Dom::XmlDocument;
@@ -312,6 +312,26 @@ fn raise(hwnd: HWND) {
             flash(hwnd);
         }
     }
+}
+
+/// Brings to the front the VS Code window that has `cwd` open. False when no VS Code window shows
+/// that folder in its title.
+pub fn focus_editor(cwd: &str) -> Result<bool> {
+    let mut found = (cwd.to_string(), None::<HWND>);
+    unsafe extern "system" fn each(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let (cwd, found) = unsafe { &mut *(lparam.0 as *mut (String, Option<HWND>)) };
+        let mut buf = [0u16; 512];
+        let n = unsafe { GetWindowTextW(hwnd, &mut buf) } as usize;
+        if unsafe { IsWindowVisible(hwnd) }.as_bool() && editor_title_is(&String::from_utf16_lossy(&buf[..n]), cwd) {
+            *found = Some(hwnd);
+            return false.into();
+        }
+        true.into()
+    }
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut found as *mut _ as isize));
+    }
+    Ok(found.1.map(raise).is_some())
 }
 
 /// A blocking error message, for when the app cannot start.

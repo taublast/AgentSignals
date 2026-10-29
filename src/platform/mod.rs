@@ -11,6 +11,8 @@
 //! - This app's window: `flash_app()`, `raise_app()`, `set_topmost(bool)`, `no_maximize()` (once,
 //!   when the window exists: no maximize button, no maximizing by double-click or snapping); `error_box(text)` when
 //!   the app cannot start (no window yet).
+//! - `focus_editor(cwd) -> Result<bool>`: brings to the front the VS Code window that has the
+//!   session's folder open (match its title with `state::editor_title_is`); `Ok(false)`: none.
 //! - `pid_alive(pid)`.
 //! - Folders: `home_dir()` (where `.claude` lives), `data_dir()` (the per-user app data folder;
 //!   the app keeps its files in `AgentSignals` under it), `sound_dirs()` (system sounds),

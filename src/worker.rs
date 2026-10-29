@@ -252,7 +252,18 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<
                     st.version += 1;
                 }
             }
-            tab_command(signals, shared, name, "focus", Signals::focus_tab)
+            let editor = shared.lock().unwrap().sessions.iter().find(|s| s.vscode && s.name.eq_ignore_ascii_case(&name)).map(|s| s.cwd.clone());
+            match editor {
+                Some(cwd) => {
+                    let fired = match platform::focus_editor(&cwd) {
+                        Ok(true) => "done".into(),
+                        Ok(false) => "no VS Code window with that folder".into(),
+                        Err(e) => e,
+                    };
+                    shared.lock().unwrap().log(Event { at_ms: state::now_ms(), pid: 0, session: name, kind: "focus".into(), busy_ms: 0, fired });
+                }
+                None => tab_command(signals, shared, name, "focus", Signals::focus_tab),
+            }
         }
         Cmd::CloseTab(name) => tab_command(signals, shared, name, "close", Signals::close_tab),
         Cmd::Topmost(on) => platform::set_topmost(on),
@@ -420,6 +431,7 @@ fn parse(v: &Value) -> Option<Session> {
         // A terminal session is kind `interactive` with entrypoint `cli`; a one-shot `-p` run is
         // also `interactive`, but with entrypoint `sdk-cli`.
         interactive: matches!(text("kind").as_str(), "interactive" | "") && matches!(text("entrypoint").as_str(), "cli" | ""),
+        vscode: text("entrypoint") == "claude-vscode",
         title,
         // Claude Code's statuses: busy, shell (running a shell command, which its own UI shows as
         // working), idle, waiting.
@@ -487,6 +499,9 @@ mod tests {
         assert!(!session(r#"{"pid":2,"sessionId":"b","kind":"bg","entrypoint":"cli","name":"job"}"#).unwrap().interactive);
         assert!(session(r#"{"pid":4,"sessionId":"d","kind":"bg","entrypoint":"cli","name":"d","spare":true}"#).is_none());
         assert!(!session(r#"{"pid":3,"sessionId":"c","kind":"interactive","entrypoint":"sdk-cli"}"#).unwrap().interactive);
+        // VS Code's Claude Code panel: listed, no terminal tab, never reopened in a terminal.
+        let vs = session(r#"{"pid":5,"sessionId":"e","kind":"interactive","entrypoint":"claude-vscode","name":"e"}"#).unwrap();
+        assert!(vs.vscode && !vs.interactive && !s.vscode);
         // An older file: no kind, entrypoint, name or status.
         let old = session(r#"{"pid":4,"sessionId":"d","cwd":"C:\\Work\\shop"}"#).unwrap();
         assert!(old.interactive);

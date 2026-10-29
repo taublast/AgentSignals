@@ -19,6 +19,9 @@ pub struct Session {
     /// A session in a terminal (kind `interactive`, entrypoint `cli`); one-shot `-p` runs, SDK
     /// runs and background workers are never reopened.
     pub interactive: bool,
+    /// Runs in the Claude Code panel of VS Code (entrypoint `claude-vscode`): no terminal tab, a
+    /// click brings its VS Code window to the front instead.
+    pub vscode: bool,
     /// What its terminal tab shows when it has no name of its own (custom or AI title).
     pub title: String,
     /// `busy`, `idle` or `waiting`.
@@ -228,6 +231,18 @@ pub fn tab_is(title: &str, name: &str) -> bool {
     title.trim_start_matches(|c: char| !c.is_alphanumeric()).trim().eq_ignore_ascii_case(name)
 }
 
+/// A VS Code window title (`file - folder - Visual Studio Code`, `folder (Workspace) - ...`) shows
+/// the folder `cwd` is in.
+pub fn editor_title_is(title: &str, cwd: &str) -> bool {
+    let folder = cwd.trim_end_matches(['\\', '/']).rsplit(['\\', '/']).next().unwrap_or("");
+    !folder.is_empty()
+        && title.contains("Visual Studio Code")
+        && title.split(" - ").any(|part| {
+            let part = part.trim().trim_end_matches(" (Workspace)");
+            part.eq_ignore_ascii_case(folder)
+        })
+}
+
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
@@ -381,7 +396,7 @@ mod tests {
     use super::*;
 
     fn s(pid: u32, status: &str, since_ms: u64) -> Session {
-        Session { pid, id: String::new(), name: format!("s{pid}"), named: true, interactive: true, title: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms }
+        Session { pid, id: String::new(), name: format!("s{pid}"), named: true, interactive: true, vscode: false, title: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms }
     }
 
     fn map(list: &[Session]) -> HashMap<u32, Session> {
@@ -394,6 +409,16 @@ mod tests {
         assert!(tab_is("◑ docs-writer", "docs-writer"));
         assert!(tab_is("✳ Fix login redirect loop", "Fix login redirect loop"));
         assert!(!tab_is("✳ api-server", "api-serve"));
+    }
+
+    #[test]
+    fn editor_titles() {
+        assert!(editor_title_is("lib.rs - DrawnUi.Rust - Visual Studio Code", r"c:\Dev\Cases\GitHub\DrawnUi.Rust"));
+        assert!(editor_title_is("● main.rs - drawnui.rust - Visual Studio Code", r"C:\Dev\DrawnUi.Rust\"));
+        assert!(editor_title_is("shop - Visual Studio Code", "/Users/me/shop"));
+        assert!(editor_title_is("api.rs - shop (Workspace) - Visual Studio Code", "/Users/me/shop"));
+        assert!(!editor_title_is("lib.rs - DrawnUi.Rust - Visual Studio Code", r"C:\Dev\DrawnUi"));
+        assert!(!editor_title_is("DrawnUi.Rust - Notepad", r"C:\Dev\DrawnUi.Rust"));
     }
 
     #[test]

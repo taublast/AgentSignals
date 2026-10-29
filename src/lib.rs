@@ -503,10 +503,20 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                     me.set_background_color(if app.unseen.contains(&s.id) { hex(FINISHED) } else { status_color(&s.status) });
                 }),
             SkiaStack::new().margin((22, 0, 84, 0)).spacing(2).children((
-                label(&name, 15).text_color(Color::WHITE).observe(move |me, app: &App| {
-                    let icons = state::rule_icons(&app.rules, &name);
-                    me.set_text(if icons.is_empty() { name.clone() } else { format!("{name}  {icons}") });
-                }),
+                SkiaRow::new().spacing(6).children((
+                    label(&name, 15).text_color(Color::WHITE).vertical_options(LayoutOptions::Center).observe(move |me, app: &App| {
+                        let icons = state::rule_icons(&app.rules, &name);
+                        me.set_text(if icons.is_empty() { name.clone() } else { format!("{name}  {icons}") });
+                    }),
+                    // Runs in VS Code, not in a terminal.
+                    SkiaShape::new()
+                        .corner_radius(4)
+                        .background_color(hex(0x3B4256))
+                        .padding((5, 1, 5, 1))
+                        .vertical_options(LayoutOptions::Center)
+                        .observe(move |me, app: &App| me.set_is_visible(app.session(pid).is_some_and(|s| s.vscode)))
+                        .children((label("VS", 10).text_color(hex(0xC9CDD4)),)),
+                )),
                 label("", 12).text_color(hex(0x9CA3AF)).max_lines(2).observe(move |me, app: &App| {
                     let Some(s) = app.session(pid) else { return };
                     let note = app.notes.get(&s.name.to_lowercase()).map_or("", |n| n.as_str());
