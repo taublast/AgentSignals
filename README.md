@@ -219,12 +219,16 @@ script tool, and a click on one only dismisses it. The download, a real app, doe
 Xcode is signed in to an Apple developer account, ad-hoc signed for local use otherwise.
 
 The first launch of the download asks macOS for permission to open it; the app's window appears
-once that is answered. Two more permissions are asked for the first time they are needed, both
+once that is answered. Three more permissions are asked for the first time they are needed, all
 under **System Settings > Privacy & Security**:
 
 - **Automation > Terminal** — for clicking a row (focus its tab), Close session, and reopening a
   session. Refused, those say so under Recent instead of failing quietly; the list and every signal
   keep working. You can grant it later.
+- **Accessibility** — only for clicking a VS Code session's row, to bring its window to the front.
+  VS Code is not scriptable and no other permission can both find the window with that folder open
+  and raise it. Asked for the first time such a row is clicked; refused, the row says so under
+  Recent and nothing else changes.
 - **Notifications** — for the notification signal; they show under Agent Signals' name.
 
 What differs from Windows:

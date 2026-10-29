@@ -578,6 +578,177 @@ pub fn error_box(text: &str) {
     }
 }
 
+// ------------------------------------------------------------ VS Code windows
+
+/// Brings forward the VS Code window that has the session's folder open; false when no window has.
+///
+/// Reading another app's window titles takes one of three permissions, and VS Code narrows them to
+/// one. Screen Recording: CGWindowList leaves out every title but our own without it, and it can
+/// only tell which window is wanted, never bring it forward. Automation for VS Code: it is not
+/// scriptable (no sdef, Cocoa scripting off), so AppleScript can start it and nothing more. That
+/// leaves Accessibility, which both reads the titles and raises the one window instead of the whole
+/// app; it is asked for once, the first time a VS Code session is clicked. Nothing here opens a
+/// window: with no match the answer is false, and the row says so.
+pub fn focus_editor(cwd: &str) -> Result<bool> {
+    if !ax::trusted() {
+        return Err("Accessibility not allowed: System Settings > Privacy & Security > Accessibility".into());
+    }
+    for pid in vscode_pids() {
+        let app = ax::Element::app(pid);
+        for window in app.windows() {
+            if !window.title().is_some_and(|t| editor_window_is(&t, cwd)) {
+                continue;
+            }
+            // A window in the Dock is brought back first: raising a minimized window does nothing
+            // and VS Code would come forward showing another folder.
+            window.unminimize();
+            window.raise();
+            app.bring_forward();
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether a window of VS Code's has the session's folder open.
+///
+/// `state::editor_title_is` reads the Windows title, which ends in the application's name; macOS
+/// puts the name in the menu bar instead and separates with an em dash, leaving "file — folder",
+/// "folder" or "folder (Workspace)". Both shapes are accepted: these windows are already known to
+/// be VS Code's, having come from its own process, so nothing but the folder is left to check.
+fn editor_window_is(title: &str, cwd: &str) -> bool {
+    let folder = cwd.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or("");
+    !folder.is_empty()
+        && (crate::state::editor_title_is(title, cwd)
+            || title
+                .split(" — ")
+                .flat_map(|part| part.split(" - "))
+                .any(|part| part.trim().trim_end_matches(" (Workspace)").eq_ignore_ascii_case(folder)))
+}
+
+/// Every process VS Code runs. The helpers live under Contents/Frameworks, so the pattern below
+/// finds the one process that has windows; any other would simply answer with none.
+fn vscode_pids() -> Vec<i32> {
+    let Ok(out) = Command::new("pgrep").args(["-f", "Visual Studio Code.app/Contents/MacOS/"]).output() else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout).lines().filter_map(|line| line.trim().parse().ok()).collect()
+}
+
+/// The piece of the Accessibility API used above. Attribute and action names are CoreFoundation
+/// strings, which `NSString` already is: the two are the same objects, so one is passed as the
+/// other. Every value these calls hand back is owned by the caller and released here.
+mod ax {
+    use objc2::rc::Retained;
+    use objc2_foundation::{NSDictionary, NSNumber, NSString};
+    use std::ffi::c_void;
+
+    type CFTypeRef = *const c_void;
+    const SUCCESS: i32 = 0;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    unsafe extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: CFTypeRef) -> u8;
+        fn AXUIElementCreateApplication(pid: i32) -> CFTypeRef;
+        fn AXUIElementCopyAttributeValue(element: CFTypeRef, attribute: CFTypeRef, value: *mut CFTypeRef) -> i32;
+        fn AXUIElementSetAttributeValue(element: CFTypeRef, attribute: CFTypeRef, value: CFTypeRef) -> i32;
+        fn AXUIElementPerformAction(element: CFTypeRef, action: CFTypeRef) -> i32;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFRelease(cf: CFTypeRef);
+        fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
+        fn CFArrayGetCount(array: CFTypeRef) -> isize;
+        fn CFArrayGetValueAtIndex(array: CFTypeRef, index: isize) -> CFTypeRef;
+    }
+
+    /// An `NSString` as the CoreFoundation string these calls take.
+    fn cf(text: &str) -> (Retained<NSString>, CFTypeRef) {
+        let string = NSString::from_str(text);
+        let raw = Retained::as_ptr(&string) as CFTypeRef;
+        (string, raw)
+    }
+
+    /// Whether this app may use the Accessibility API, asking the user for it the first time: the
+    /// system shows its own dialog with the way to System Settings, and nothing is asked again
+    /// once the answer is given.
+    pub fn trusted() -> bool {
+        let prompt = NSString::from_str("AXTrustedCheckOptionPrompt");
+        let yes = NSNumber::numberWithBool(true);
+        let options = NSDictionary::from_slices(&[&*prompt], &[&*yes]);
+        unsafe { AXIsProcessTrustedWithOptions(Retained::as_ptr(&options) as CFTypeRef) != 0 }
+    }
+
+    /// An accessibility element: an application, or one of its windows.
+    pub struct Element(CFTypeRef);
+
+    impl Element {
+        /// The element a process shows its windows through.
+        pub fn app(pid: i32) -> Self {
+            Self(unsafe { AXUIElementCreateApplication(pid) })
+        }
+
+        /// The application's windows, in the order it keeps them; empty for a process that has none
+        /// and for one that does not answer at all, a helper or an app still starting up.
+        pub fn windows(&self) -> Vec<Element> {
+            let Some(array) = self.copy("AXWindows") else { return Vec::new() };
+            let count = unsafe { CFArrayGetCount(array.0) };
+            (0..count)
+                .filter_map(|i| {
+                    let window = unsafe { CFArrayGetValueAtIndex(array.0, i) };
+                    (!window.is_null()).then(|| Element(unsafe { CFRetain(window) }))
+                })
+                .collect()
+        }
+
+        /// A window's title, the text shown in its title bar.
+        pub fn title(&self) -> Option<String> {
+            let value = self.copy("AXTitle")?;
+            Some(unsafe { &*(value.0 as *const NSString) }.to_string())
+        }
+
+        /// Takes the window out of the Dock when it is in it.
+        pub fn unminimize(&self) {
+            let minimized = self.copy("AXMinimized").is_some_and(|v| unsafe { &*(v.0 as *const NSNumber) }.boolValue());
+            if minimized {
+                self.set("AXMinimized", &NSNumber::numberWithBool(false));
+            }
+        }
+
+        /// Puts this window in front of the application's others.
+        pub fn raise(&self) {
+            let (_name, action) = cf("AXRaise");
+            unsafe { AXUIElementPerformAction(self.0, action) };
+        }
+
+        /// Makes the application the one the user is in.
+        pub fn bring_forward(&self) {
+            self.set("AXFrontmost", &NSNumber::numberWithBool(true));
+        }
+
+        fn copy(&self, attribute: &str) -> Option<Element> {
+            let (_name, attribute) = cf(attribute);
+            let mut value: CFTypeRef = std::ptr::null();
+            let error = unsafe { AXUIElementCopyAttributeValue(self.0, attribute, &mut value) };
+            (error == SUCCESS && !value.is_null()).then_some(Element(value))
+        }
+
+        fn set(&self, attribute: &str, value: &NSNumber) {
+            let (_name, attribute) = cf(attribute);
+            unsafe { AXUIElementSetAttributeValue(self.0, attribute, value as *const NSNumber as CFTypeRef) };
+        }
+    }
+
+    impl Drop for Element {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { CFRelease(self.0) };
+            }
+        }
+    }
+}
+
 /// Asking after a process without starting one: this runs for every session twice a second.
 /// Signal 0 only checks; a process of another user answers "not allowed", which means it is there.
 pub fn pid_alive(pid: u32) -> bool {
@@ -635,6 +806,27 @@ mod tests {
 
     /// A script that never finishes is given up on instead of holding the worker thread, which
     /// would leave the session list empty. Takes PATIENCE seconds, so it is run by hand.
+    #[test]
+    fn editor_windows_on_this_platform() {
+        assert!(editor_window_is("FiltersCamera (Workspace)", "/Users/me/Projects/FiltersCamera"));
+        assert!(editor_window_is("MultiSelectionList.cs — Aromarket", "/Users/me/Dev/aromarket/"));
+        assert!(editor_window_is("shop", "/Users/me/shop"));
+        // The Windows shape keeps working: the app reads sessions of both.
+        assert!(editor_window_is("lib.rs - DrawnUi.Rust - Visual Studio Code", r"c:\Dev\DrawnUi.Rust"));
+        assert!(!editor_window_is("MultiSelectionList.cs — Aromarket", "/Users/me/Dev/aroma"));
+        assert!(!editor_window_is("Aromarket", ""));
+    }
+
+    /// Live, by hand: it needs Accessibility for whatever runs the test, and the first run asks
+    /// for it. A folder no editor has open must come back as "no window", not as an error: that is
+    /// the answer a click on a session whose window is closed gets.
+    #[test]
+    #[ignore]
+    fn no_editor_window_has_that_folder() {
+        let folder = std::env::temp_dir().join(format!("agentsignals-test-{}-editor", std::process::id()));
+        assert!(!focus_editor(&folder.to_string_lossy()).expect("Accessibility is needed for this test"));
+    }
+
     #[test]
     #[ignore]
     fn a_script_that_hangs_is_given_up_on() {
