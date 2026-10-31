@@ -51,7 +51,8 @@ struct App {
     tints: HashMap<String, u32>,
     /// Ids of sessions that finished and were not clicked since: their dots are red.
     unseen: std::collections::HashSet<String>,
-    /// The user folder: a session started there shows no folder line.
+    /// The row under the mouse: `p<pid>` for a live session, `c<id>` for a closed one.
+    hovered: Option<String>,
     /// What the rows were built from: rebuilt only when it changes.
     session_key: (Vec<(u32, String)>, Vec<String>),
     root: Handle<SkiaLayout>,
@@ -127,7 +128,7 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                         }),
                     label("Mute", 14).vertical_options(LayoutOptions::Center),
                 )),
-                label("", 13).text_color(hex(0x9CA3AF)).vertical_options(LayoutOptions::Center).observe(|me, app: &App| {
+                label("", 13).text_color(hex(0x9CA3AF)).vertical_options(LayoutOptions::Center).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
                     let count = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
                     let closed = if app.inactive.is_empty() { String::new() } else { format!(" · {} closed", app.inactive.len()) };
                     me.set_text(format!("{} waiting · {} busy · {} idle{closed}", count("waiting"), count("busy"), count("idle")));
@@ -143,9 +144,10 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                 .keep_scroll_bars_visible(true)
                 .content(SkiaStack::new().padding((12, 0, 12, 16)).spacing(8).children((
                 reopen_banner(),
-                SkiaStack::new().spacing(6).assign(&mut app.session_stack),
+                // One Tab stop: the arrow keys move between the rows.
+                SkiaStack::new().spacing(6).accessibility_role(Aria::LIST).accessibility_label("Sessions").assign(&mut app.session_stack),
                 section("Recent"),
-                label("", 12).text_color(hex(0x9CA3AF)).observe(|me, app: &App| me.set_text(recent(app))),
+                label("", 12).text_color(hex(0x9CA3AF)).accessibility_role(Aria::TEXT).observe(|me, app: &App| me.set_text(recent(app))),
             ))),
         )),
     ))
@@ -161,12 +163,14 @@ fn reopen_banner() -> Build<SkiaShape> {
         .padding((12, 10, 12, 12))
         .fill_x()
         .observe(|me, app: &App| me.set_is_visible(!app.reopen.is_empty()))
+        .accessibility_role(Aria::REGION)
+        .accessibility_label("Sessions from last time")
         .children(SkiaStack::new().spacing(8).children((
-            label("", 14).text_color(Color::WHITE).observe(|me, app: &App| {
+            label("", 14).text_color(Color::WHITE).accessibility_role(Aria::TEXT).accessibility_live(Aria::LIVE_POLITE).observe(|me, app: &App| {
                 let n = app.reopen.len();
                 me.set_text(format!("{n} session{} from last time {} closed", if n == 1 { "" } else { "s" }, if n == 1 { "is" } else { "are" }));
             }),
-            label("", 12).text_color(hex(0x9CA3AF)).max_lines(4).observe(|me, app: &App| me.set_text(app.reopen.join(", "))),
+            label("", 12).text_color(hex(0x9CA3AF)).max_lines(4).accessibility_role(Aria::TEXT).observe(|me, app: &App| me.set_text(app.reopen.join(", "))),
             SkiaRow::new().spacing(8).children((
                 SkiaButton::new("")
                     .font_size(13)
@@ -224,19 +228,27 @@ const ROW: u32 = 0x1C2030;
 /// The row of a session that needs a look (waiting, working, just finished): a little brighter
 /// than the resting row, with the same low saturation as the app's panels.
 const ROW_ACTIVE: u32 = 0x30374B;
+/// White mixed into a row under the mouse.
+const ROW_HOVER: f32 = 0.06;
 const SWATCH: f32 = 26.0;
 const PALETTE_WIDTH: f32 = 9.0 * SWATCH + 8.0 * 6.0 + 2.0 * 12.0 + 8.0;
 
 /// A session row's background: the active or the resting row, with its tint mixed in, 30 % while
 /// active and 10 % at rest, so text stays readable either way.
-fn row_color(tint: Option<u32>, active: bool) -> Color {
+/// Under the mouse it is a little lighter.
+fn row_color(tint: Option<u32>, active: bool, hovered: bool) -> Color {
     let (base, amount) = if active { (ROW_ACTIVE, 0.3) } else { (ROW, 0.1) };
-    let Some(t) = tint else { return hex(base) };
-    let mix = |shift: u32| {
-        let (row, tint) = (((base >> shift) & 0xFF) as f32, ((t >> shift) & 0xFF) as f32);
-        (row + (tint - row) * amount) as u32
+    let row = tint.map_or(base, |t| mix(base, t, amount));
+    hex(if hovered { mix(row, 0xFFFFFF, ROW_HOVER) } else { row })
+}
+
+/// `amount` of `to` mixed into `from`, per channel.
+fn mix(from: u32, to: u32, amount: f32) -> u32 {
+    let channel = |shift: u32| {
+        let (a, b) = (((from >> shift) & 0xFF) as f32, ((to >> shift) & 0xFF) as f32);
+        (a + (b - a) * amount) as u32
     };
-    hex(mix(16) << 16 | mix(8) << 8 | mix(0))
+    channel(16) << 16 | channel(8) << 8 | channel(0)
 }
 
 /// The tint palette: the session's name, then the colors in one row.
@@ -248,6 +260,12 @@ fn palette_panel() -> Build<SkiaShape> {
         .stroke_width(1.55)
         .width_request(PALETTE_WIDTH)
         .padding((4, 4, 4, 4))
+        .accessibility_role(Aria::MENU)
+        .observe(|me, app: &App| {
+            if let Some(m) = &app.menu {
+                me.set_accessibility_label(format!("Tint of {}", m.name));
+            }
+        })
         .children(SkiaStack::new().children((
             label("", 12).text_color(hex(0x9CA3AF)).max_lines(1).padding((12, 4, 12, 4)).observe(|me, app: &App| {
                 if let Some(m) = &app.menu {
@@ -258,7 +276,6 @@ fn palette_panel() -> Build<SkiaShape> {
             SkiaRow::new()
                 .spacing(6)
                 .padding((12, 6, 12, 10))
-                .accessibility_role(Aria::LIST)
                 .children(TINTS.iter().map(|&(name, color)| swatch(name, color)).collect::<Vec<_>>()),
         )))
 }
@@ -281,9 +298,12 @@ fn swatch(name: &'static str, color: Option<u32>) -> Build<SkiaShape> {
         .height_request(SWATCH)
         .background_color(color.map_or(hex(ROW), hex))
         .stroke_width(2)
-        .accessibility_role(Aria::MENU_ITEM)
+        .accessibility_role(Aria::MENU_ITEM_RADIO)
         .accessibility_label(name)
-        .observe(move |me, app: &App| me.set_stroke_color(ring(app, false)))
+        .observe(move |me, app: &App| {
+            me.set_stroke_color(ring(app, false));
+            me.set_accessibility_is_pressed(Some(app.menu.as_ref().is_some_and(|m| app.tint(&m.name) == color)));
+        })
         .on_hovered(move |me, app: &mut App, _cx, on| me.set_stroke_color(ring(app, on)))
         .on_tapped(move |_me, app: &mut App, cx| {
             if let Some(m) = app.menu.take() {
@@ -314,6 +334,12 @@ fn menu_panel() -> Build<SkiaShape> {
             .stroke_width(1.55)
             .width_request(MENU_WIDTH)
             .padding((4, 4, 4, 4))
+            .accessibility_role(Aria::MENU)
+            .observe(|me, app: &App| {
+                if let Some(m) = &app.menu {
+                    me.set_accessibility_label(format!("Menu of {}", m.name));
+                }
+            })
             .children(SkiaStack::new().children((
                 // Title bar: whose menu this is, one line, so the wrong session is not touched.
                 label("", 12)
@@ -371,8 +397,10 @@ fn menu_panel() -> Build<SkiaShape> {
                     .padding((10, 8, 10, 8))
                     .spacing(10)
                     .observe(|me, app: &App| me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.confirm)))
+                    .accessibility_role(Aria::ALERT_DIALOG)
+                    .accessibility_label("Close session")
                     .children((
-                        label("", 13).observe(|me, app: &App| {
+                        label("", 13).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
                             if let Some(m) = &app.menu {
                                 me.set_text(format!("Close the terminal tab of {}? It stays in the list: click it to reopen.", m.name));
                             }
@@ -400,8 +428,13 @@ fn signal_item(signal: Signal) -> Build<SkiaShape> {
         .corner_radius(6)
         .fill_x()
         .padding((12, 9, 12, 9))
-        .accessibility_role(Aria::MENU_ITEM)
+        .accessibility_role(Aria::MENU_ITEM_CHECKBOX)
         .accessibility_label(name)
+        .observe(move |me, app: &App| {
+            if let Some(m) = &app.menu {
+                me.set_accessibility_is_pressed(Some(state::finished_signal(&app.rules, &m.name, signal)));
+            }
+        })
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .on_hovered(hover_item)
         .on_tapped(move |_me, app: &mut App, cx| {
@@ -448,7 +481,7 @@ fn label(text: &str, size: i32) -> Build<SkiaLabel> {
 }
 
 fn section(title: &str) -> Build<SkiaLabel> {
-    label(title, 13).text_color(hex(0x9CA3AF)).margin((4, 12, 0, 0))
+    label(title, 13).text_color(hex(0x9CA3AF)).margin((4, 12, 0, 0)).accessibility_role(Aria::HEADING)
 }
 
 /// Idle and closed sessions: the quiet gray.
@@ -470,13 +503,34 @@ fn status_color(status: &str) -> Color {
 /// Left click: select its terminal tab. Right click / Menu key: copy its name, close it.
 fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
     let (focus, menu, tint) = (name.clone(), name.clone(), name.clone());
+    let key = format!("p{pid}");
+    let color = move |app: &App| {
+        // Brighter while it needs a look: not idle, or just finished.
+        let active = app.session(pid).is_some_and(|s| s.status != "idle" || app.unseen.contains(&s.id));
+        row_color(app.tint(&tint), active, app.hovered.as_deref() == Some(key.as_str()))
+    };
+    let shade = color.clone();
     SkiaShape::new()
         .corner_radius(10)
         .background_color(hex(ROW))
         .observe(move |me, app: &App| {
-            // Brighter while it needs a look: not idle, or just finished.
-            let active = app.session(pid).is_some_and(|s| s.status != "idle" || app.unseen.contains(&s.id));
-            me.set_background_color(row_color(app.tint(&tint), active));
+            me.set_background_color(color(app));
+            // Read out: the name, what it does now, where it runs.
+            let Some(s) = app.session(pid) else { return };
+            let status = match s.status.as_str() {
+                "waiting" if s.waiting_for.is_empty() => "waiting for you".to_string(),
+                "waiting" => format!("waiting for you: {}", s.waiting_for),
+                "busy" => "working".into(),
+                _ if app.unseen.contains(&s.id) => "finished".into(),
+                _ => "idle".into(),
+            };
+            let place = if s.vscode { ", in VS Code" } else { "" };
+            me.set_accessibility_label(format!("{}, {status}{place}", s.name));
+            me.set_accessibility_hint(if s.vscode { "Brings its VS Code window to the front" } else { "Brings its terminal tab to the front" }.to_string());
+        })
+        .on_hovered(move |me, app: &mut App, _cx, on| {
+            app.hovered = on.then(|| format!("p{pid}"));
+            me.set_background_color(shade(app));
         })
         .padding((12, 10, 12, 10))
         .fill_x()
@@ -558,14 +612,22 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
 /// A terminal session that is not running: gray, a click reopens it in a terminal tab.
 fn closed_row(id: String, name: String) -> Build<SkiaShape> {
     let (reopen, menu, folder, tint) = (id.clone(), id.clone(), id.clone(), name.clone());
+    let key = format!("c{id}");
+    let color = move |app: &App| row_color(app.tint(&tint), false, app.hovered.as_deref() == Some(key.as_str()));
+    let (shade, hover_key) = (color.clone(), format!("c{id}"));
     SkiaShape::new()
         .corner_radius(10)
         .background_color(hex(ROW))
-        .observe(move |me, app: &App| me.set_background_color(row_color(app.tint(&tint), false)))
+        .observe(move |me, app: &App| me.set_background_color(color(app)))
+        .on_hovered(move |me, app: &mut App, _cx, on| {
+            app.hovered = on.then(|| hover_key.clone());
+            me.set_background_color(shade(app));
+        })
         .padding((12, 10, 12, 10))
         .fill_x()
         .accessibility_role(Aria::BUTTON)
-        .accessibility_label(format!("{name}, closed, reopen"))
+        .accessibility_label(format!("{name}, closed"))
+        .accessibility_hint("Reopens it in a terminal")
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .consume_gestures(|_me, app: &mut App, _cx, gesture| {
             app.button = gesture.button;
@@ -703,6 +765,7 @@ pub fn run() {
             inactive: Vec::new(),
             tints: HashMap::new(),
             unseen: Default::default(),
+            hovered: None,
             root: Handle::default(),
             session_stack: Handle::default(),
             menu: None,
