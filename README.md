@@ -16,8 +16,8 @@ through tabs to find out.
   for a session in VS Code's Claude Code panel.
 - **Get them back after a reboot**: one click reopens every session that was open, with its
   conversation, in its terminal.
-- **Screen readers and the keyboard**: every row reads its name and status, menus read which
-  signals are on; Tab and the arrow keys move through the list.
+- **Works with screen readers**: every session reads its name, its status and what a click does;
+  menus read which signals are on.
 
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
 Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
@@ -99,6 +99,7 @@ you click the row (or its notification), or the session starts working again.
 **Recent**: the last status changes ("frontend finished after 17m") and which signals they gave.
 
 The list scrolls when it is longer than the window; the bar on the right shows where you are.
+Rows, menu items and the switches light up under the mouse.
 
 ### What the colors and icons mean
 
