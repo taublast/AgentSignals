@@ -267,12 +267,6 @@ fn palette_panel() -> Build<SkiaShape> {
         .stroke_width(1.55)
         .width_request(PALETTE_WIDTH)
         .padding((4, 4, 4, 4))
-        .accessibility_role(Aria::MENU)
-        .observe(|me, app: &App| {
-            if let Some(m) = &app.menu {
-                me.set_accessibility_label(format!("Tint of {}", m.name));
-            }
-        })
         .children(SkiaStack::new().children((
             label("", 12).text_color(hex(0x9CA3AF)).max_lines(1).padding((12, 4, 12, 4)).observe(|me, app: &App| {
                 if let Some(m) = &app.menu {
@@ -280,9 +274,16 @@ fn palette_panel() -> Build<SkiaShape> {
                 }
             }),
             SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(0x3B4256)),
+            // The menu role on the row that holds the colors: Left / Right move between them.
             SkiaRow::new()
                 .spacing(6)
                 .padding((12, 6, 12, 10))
+                .accessibility_role(Aria::MENU)
+                .observe(|me, app: &App| {
+                    if let Some(m) = &app.menu {
+                        me.set_accessibility_label(format!("Tint of {}", m.name));
+                    }
+                })
                 .children(TINTS.iter().map(|&(name, color)| swatch(name, color)).collect::<Vec<_>>()),
         )))
 }
@@ -341,12 +342,6 @@ fn menu_panel() -> Build<SkiaShape> {
             .stroke_width(1.55)
             .width_request(MENU_WIDTH)
             .padding((4, 4, 4, 4))
-            .accessibility_role(Aria::MENU)
-            .observe(|me, app: &App| {
-                if let Some(m) = &app.menu {
-                    me.set_accessibility_label(format!("Menu of {}", m.name));
-                }
-            })
             .children(SkiaStack::new().children((
                 // Title bar: whose menu this is, one line, so the wrong session is not touched.
                 label("", 12)
@@ -359,7 +354,11 @@ fn menu_panel() -> Build<SkiaShape> {
                         }
                     }),
                 SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(0x3B4256)),
-                SkiaStack::new().observe(|me, app: &App| me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.closed.is_none() && !m.confirm))).children((
+                // The menu role sits on the column that holds the items: the arrows move between them.
+                SkiaStack::new().accessibility_role(Aria::MENU).observe(|me, app: &App| {
+                    me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.closed.is_none() && !m.confirm));
+                    menu_name(me, app);
+                }).children((
                     menu_item("📋", "Copy name", |app, cx| {
                         if let Some(m) = app.menu.take() {
                             cx.set_clipboard(m.name);
@@ -382,7 +381,10 @@ fn menu_panel() -> Build<SkiaShape> {
                     }),
                 )),
                 // A closed session.
-                SkiaStack::new().observe(|me, app: &App| me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.closed.is_some()))).children((
+                SkiaStack::new().accessibility_role(Aria::MENU).observe(|me, app: &App| {
+                    me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.closed.is_some()));
+                    menu_name(me, app);
+                }).children((
                     menu_item("📋", "Copy name", |app, cx| {
                         if let Some(m) = app.menu.take() {
                             cx.set_clipboard(m.name);
@@ -426,6 +428,13 @@ fn menu_panel() -> Build<SkiaShape> {
                         )),
                     )),
             )))
+}
+
+/// A menu's name for screen readers: whose menu it is.
+fn menu_name(me: &mut Mut<'_, SkiaLayout>, app: &App) {
+    if let Some(m) = &app.menu {
+        me.set_accessibility_label(format!("Menu of {}", m.name));
+    }
 }
 
 /// A menu toggle: this signal when the session finishes, on or off.
