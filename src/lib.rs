@@ -95,28 +95,14 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
             // Header: wraps to more lines in a narrow window. The title is on the window frame.
             SkiaWrap::new().fill_x().padding((16, 12, 16, 8)).spacing(12).row(0).children((
                 SkiaRow::new().spacing(8).children((
-                    SkiaSwitch::new()
-                        .color_frame_on(hex(ACCENT))
-                        .width_request(SWITCH_WIDTH)
-                        .height_request(SWITCH_HEIGHT)
-                        .color_frame_off(hex(0x3B4256))
-                        .color_thumb_off(hex(0xC9CDD4))
-                        .accessibility_label("Keep window on top")
-                        .vertical_options(LayoutOptions::Center)
+                    switch("Keep window on top")
                         .on_toggled(|_me, app: &mut App, _cx, on| {
                             let _ = app.tx.send(Cmd::Topmost(on));
                         }),
                     label("On top", 14).vertical_options(LayoutOptions::Center),
                 )),
                 SkiaRow::new().spacing(8).children((
-                    SkiaSwitch::new()
-                        .color_frame_on(hex(ACCENT))
-                        .width_request(SWITCH_WIDTH)
-                        .height_request(SWITCH_HEIGHT)
-                        .color_frame_off(hex(0x3B4256))
-                        .color_thumb_off(hex(0xC9CDD4))
-                        .accessibility_label("Mute all signals")
-                        .vertical_options(LayoutOptions::Center)
+                    switch("Mute all signals")
                         .observe(|me, app: &App| me.set_is_toggled(app.muted))
                         .on_toggled(|_me, app: &mut App, _cx, on| {
                             // The window's copy too, at once: `observe` sets the switch from it, and a
@@ -152,6 +138,27 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
         )),
     ))
 }
+
+/// A header switch, named for screen readers; under the mouse its track is a little lighter.
+fn switch(name: &str) -> Build<SkiaSwitch> {
+    let (on, off) = (ACCENT, 0x3B4256);
+    SkiaSwitch::new()
+        .color_frame_on(hex(on))
+        .width_request(SWITCH_WIDTH)
+        .height_request(SWITCH_HEIGHT)
+        .color_frame_off(hex(off))
+        .color_thumb_off(hex(0xC9CDD4))
+        .accessibility_label(name)
+        .vertical_options(LayoutOptions::Center)
+        .on_hovered(move |me, _app: &mut App, _cx, hovered| {
+            let lift = |c: u32| hex(if hovered { mix(c, 0xFFFFFF, SWITCH_HOVER) } else { c });
+            me.set_color_frame_on(Some(lift(on)));
+            me.set_color_frame_off(Some(lift(off)));
+        })
+}
+
+/// White mixed into a switch's track under the mouse.
+const SWITCH_HOVER: f32 = 0.15;
 
 /// After a reboot: the sessions open last time, with a button that reopens them all.
 fn reopen_banner() -> Build<SkiaShape> {
