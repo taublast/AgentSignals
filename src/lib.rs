@@ -803,3 +803,85 @@ pub fn run() {
         )
     });
 }
+
+/// The session menu and the tint palette take the keyboard as native menus do. Nothing here picks
+/// an item: the items would write the app's real rules and settings files.
+#[cfg(test)]
+mod menu_keys {
+    use super::*;
+    use drawnui::testing::Headless;
+
+    fn host(rules: Vec<Rule>) -> Headless<App> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::mem::forget(rx);
+        let app = App {
+            shared: Arc::new(Mutex::new(State::default())),
+            tx,
+            seen: 0,
+            ticking: true,
+            now: 0,
+            sessions: Vec::new(),
+            rules,
+            events: Vec::new(),
+            notes: HashMap::new(),
+            muted: false,
+            reopen: Vec::new(),
+            session_key: (Vec::new(), Vec::new()),
+            inactive: Vec::new(),
+            tints: HashMap::new(),
+            unseen: Default::default(),
+            hovered: None,
+            root: Handle::default(),
+            session_stack: Handle::default(),
+            menu: None,
+            popup: None,
+            button: MouseButton::Left,
+            size: Size::default(),
+        };
+        let mut host = Headless::new(Ui::new(app, |_: &mut App| SkiaLayout::new().fill()), 600, 600, 1.0);
+        host.ui.set_keyboard_navigation(true);
+        host.ui.set_accessibility_enabled(true);
+        host.settle();
+        host
+    }
+
+    fn focused(host: &Headless<App>) -> String {
+        let id = host.ui.accessibility_focused();
+        host.ui.accessibility_nodes().iter().find(|n| Some(n.control) == id).map_or(String::new(), |n| n.label.clone())
+    }
+
+    fn key(host: &mut Headless<App>, key: &str) -> String {
+        host.press_key(key);
+        host.settle();
+        focused(host)
+    }
+
+    fn open(host: &mut Headless<App>) {
+        let menu = Menu { name: "api".into(), closed: None, at: Point::new(20.0, 20.0), confirm: false };
+        open_menu(&mut host.ui.state, &mut host.ui.tree.cx(), menu);
+        host.ui.state_changed();
+        host.settle();
+    }
+
+    #[test]
+    fn menus_work_from_the_keyboard() {
+        let mut host = host(Vec::new());
+        open(&mut host);
+        assert_eq!(focused(&host), "Copy name", "the menu opens on its first item");
+        assert_eq!(key(&mut host, "ArrowDown"), "Announce when finished");
+        assert_eq!(key(&mut host, "ArrowDown"), "Play a sound when finished");
+        assert_eq!(key(&mut host, "ArrowUp"), "Announce when finished");
+
+        open_palette(&mut host.ui.state, &mut host.ui.tree.cx());
+        host.ui.state_changed();
+        host.settle();
+        assert_eq!(focused(&host), "None", "the palette opens on the current tint");
+        assert_eq!(key(&mut host, "ArrowRight"), "Orange");
+
+        // A signal that is on is not a current choice: the menu still opens on its first item.
+        let say: Rule = serde_json::from_str(r#"{"session":"api","on":"finished","say":"{name} finished"}"#).unwrap();
+        let mut host = self::host(vec![say]);
+        open(&mut host);
+        assert_eq!(focused(&host), "Copy name");
+    }
+}
