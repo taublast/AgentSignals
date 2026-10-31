@@ -16,6 +16,8 @@ through tabs to find out.
   for a session in VS Code's Claude Code panel.
 - **Get them back after a reboot**: one click reopens every session that was open, with its
   conversation, in its terminal.
+- **Screen readers and the keyboard**: every row reads its name and status, menus read which
+  signals are on; Tab and the arrow keys move through the list.
 
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
 Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
