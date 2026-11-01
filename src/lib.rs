@@ -162,8 +162,16 @@ fn switch(name: &str) -> Build<SkiaSwitch> {
         })
 }
 
-/// White mixed into a switch's track under the mouse.
+/// White mixed into a switch's track or a button under the mouse.
 const SWITCH_HOVER: f32 = 0.15;
+
+/// A button in the app's colors; under the mouse it is a little lighter, as the switches are.
+/// Screen readers and the keyboard take it as a button (`ui`) and read its caption.
+fn button(text: &str, color: u32) -> Build<SkiaButton> {
+    SkiaButton::new(text).font_size(13).background_color(hex(color)).on_hovered(move |me, _app: &mut App, _cx, hovered| {
+        me.set_background_color(hex(if hovered { mix(color, 0xFFFFFF, SWITCH_HOVER) } else { color }));
+    })
+}
 
 /// After a reboot: the sessions open last time, with a button that reopens them all.
 fn reopen_banner() -> Build<SkiaShape> {
@@ -184,10 +192,8 @@ fn reopen_banner() -> Build<SkiaShape> {
             }),
             label("", 12).text_color(hex(0x9CA3AF)).max_lines(4).accessibility_role(Aria::TEXT).observe(|me, app: &App| me.set_text(app.reopen.join(", "))),
             SkiaRow::new().spacing(8).children((
-                SkiaButton::new("")
-                    .font_size(13)
+                button("", ACCENT)
                     .accessibility_label("Reopen sessions from last time")
-                    .background_color(hex(ACCENT))
                     .observe(|me, app: &App| {
                         let n = app.reopen.len();
                         me.set_text(format!("Reopen {n} session{} from last time", if n == 1 { "" } else { "s" }));
@@ -195,7 +201,7 @@ fn reopen_banner() -> Build<SkiaShape> {
                     .on_tapped(|_me, app: &mut App, _cx| {
                         let _ = app.tx.send(Cmd::Reopen);
                     }),
-                SkiaButton::new("Not now").font_size(13).accessibility_label("Not now").background_color(hex(0x3B4256)).on_tapped(|_me, app: &mut App, _cx| {
+                button("Not now", 0x3B4256).on_tapped(|_me, app: &mut App, _cx| {
                     let _ = app.tx.send(Cmd::Dismiss);
                 }),
             )),
@@ -221,12 +227,12 @@ fn update_banner() -> Build<SkiaShape> {
                 }
             }),
             SkiaRow::new().spacing(8).children((
-                SkiaButton::new("Download").font_size(13).background_color(hex(ACCENT)).on_tapped(move |_me, app: &mut App, _cx| {
+                button("Download", ACCENT).on_tapped(move |_me, app: &mut App, _cx| {
                     if let Some(u) = offered(app) {
                         platform::open_url(&u.url);
                     }
                 }),
-                SkiaButton::new("Later").font_size(13).background_color(hex(0x3B4256)).on_tapped(move |_me, app: &mut App, _cx| {
+                button("Later", 0x3B4256).on_tapped(move |_me, app: &mut App, _cx| {
                     if let Some(version) = offered(app).map(|u| u.version.clone()) {
                         // The window's copy too, at once: the banner goes now, not at the next sync.
                         app.skipped_update = version.clone();
@@ -463,13 +469,13 @@ fn menu_panel() -> Build<SkiaShape> {
                             }
                         }),
                         SkiaRow::new().spacing(8).children((
-                            SkiaButton::new("Close tab").font_size(13).width_request(100).background_color(hex(0xDC2626)).on_tapped(|_me, app: &mut App, cx| {
+                            button("Close tab", 0xDC2626).width_request(100).on_tapped(|_me, app: &mut App, cx| {
                                 if let Some(m) = app.menu.take() {
                                     let _ = app.tx.send(Cmd::CloseTab(m.name));
                                 }
                                 menu_done(app, cx);
                             }),
-                            SkiaButton::new("Cancel").font_size(13).width_request(100).background_color(hex(0x3B4256)).on_tapped(|_me, app: &mut App, cx| {
+                            button("Cancel", 0x3B4256).width_request(100).on_tapped(|_me, app: &mut App, cx| {
                                 app.menu = None;
                                 menu_done(app, cx);
                             }),
@@ -788,6 +794,12 @@ fn sync(app: &mut App, cx: &mut Cx) {
     }
 }
 
+/// The window. Every SkiaButton is a button for screen readers and the keyboard (the engine gives
+/// it no role of its own).
+fn ui(app: App) -> Ui<App> {
+    Ui::new(app, build).default_accessibility_role::<SkiaButton>(Aria::BUTTON)
+}
+
 static STARTED: OnceLock<(Shared, Sender<Cmd>)> = OnceLock::new();
 
 pub fn run() {
@@ -843,7 +855,7 @@ pub fn run() {
             size: Size::default(),
         };
         Box::new(
-            Ui::new(app, build)
+            ui(app)
                 .font_bytes("Default", include_bytes!("../assets/OpenSans-Regular.ttf"))
                 .background(hex(0x12141C))
                 .on_canvas_resized(|app, size, cx| {
@@ -893,7 +905,7 @@ mod menu_keys {
             button: MouseButton::Left,
             size: Size::default(),
         };
-        let mut host = Headless::new(Ui::new(app, build), 600, 600, 1.0);
+        let mut host = Headless::new(ui(app), 600, 600, 1.0);
         host.ui.set_keyboard_navigation(true);
         host.ui.set_accessibility_enabled(true);
         host.settle();
@@ -937,7 +949,11 @@ mod menu_keys {
         host.ui.state.update = Some(update::Update { version: "9.9.9".into(), url: "https://example.invalid".into() });
         host.ui.state_changed();
         host.settle();
-        assert!(host.ui.accessibility_nodes().iter().any(|n| n.label == "Agent Signals 9.9.9 is available"));
+        let nodes = host.ui.accessibility_nodes();
+        assert!(nodes.iter().any(|n| n.label == "Agent Signals 9.9.9 is available"));
+        for name in ["Download", "Later"] {
+            assert!(nodes.iter().any(|n| n.role == Aria::BUTTON && n.label == name && n.can_interact), "{name} is a button");
+        }
 
         // A signal that is on is not a current choice: the menu still opens on its first item.
         let say: Rule = serde_json::from_str(r#"{"session":"api","on":"finished","say":"{name} finished"}"#).unwrap();
