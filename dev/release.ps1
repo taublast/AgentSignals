@@ -24,7 +24,9 @@ try {
         $built = Join-Path $env:CARGO_TARGET_DIR "$target\release\agentsignals.exe"
         $bytes = [IO.File]::ReadAllBytes($built)
         $text = [Text.Encoding]::ASCII.GetString($bytes) + [Text.Encoding]::Unicode.GetString($bytes)
-        $left = foreach ($p in $env:USERPROFILE, $repo, $env:USERNAME) { if ($p -and $text.IndexOf($p, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $p } }
+        # The user name only as a folder in a path: the public GitHub account (taublast) in the update
+        # address starts with the same letters.
+        $left = foreach ($p in $env:USERPROFILE, $repo, "\$env:USERNAME\", "/$env:USERNAME/") { if ($p -and $text.IndexOf($p, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $p } }
         if ($left) { throw "local paths still in the $arch exe: $($left -join ', ')" }
         $out = Join-Path $env:CARGO_TARGET_DIR "agentsignals-$version-windows-$arch.exe"
         Copy-Item $built $out -Force
