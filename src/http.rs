@@ -61,6 +61,12 @@ pub fn take_over() -> Option<TcpListener> {
     })
 }
 
+/// What holds the port is Agent Signals from before 0.6.6: it answers the API but knows neither
+/// /version nor /quit, so a newer version cannot take over from it.
+pub fn older_running() -> bool {
+    ask("GET / HTTP/1.1\r\n\r\n".into()).contains("Agent Signals API") && !ask("GET /version HTTP/1.1\r\n\r\n".into()).contains("\"version\"")
+}
+
 /// One request to the instance on the port; its whole answer, empty when nothing answers.
 fn ask(request: String) -> String {
     let Ok(mut s) = TcpStream::connect_timeout(&(std::net::Ipv4Addr::LOCALHOST, PORT).into(), Duration::from_secs(2)) else { return String::new() };

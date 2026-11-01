@@ -831,9 +831,11 @@ pub fn run() {
         let _ = log.and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()));
     }));
     let Some(listener) = http::bind().or_else(http::take_over) else {
-        // Already running: wave from the running one instead. Another program on the port: say so,
-        // never quit without a word.
-        if !http::poke_running() {
+        // Already running: wave from the running one instead. An older one that cannot be asked to
+        // close, or another program on the port: say so, never quit without a word.
+        if http::older_running() {
+            platform::error_box("An older version of Agent Signals is still running. Quit it, then open this version again.");
+        } else if !http::poke_running() {
             platform::error_box(&format!(
                 "Agent Signals cannot start: another program uses port {}, which the app needs for its API. Close that program and start Agent Signals again.",
                 http::PORT
