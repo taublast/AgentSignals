@@ -19,8 +19,9 @@ through tabs to find out.
 - **Full accessibility**: use it with the keyboard (Tab and the arrow keys) and with screen
   readers. Every session reads its name, its status and what a click does; menus read which
   signals are on.
-- **Knows about new versions**: when a newer release is out, a banner offers its download for your
-  system; Later hides it until the next one.
+- **Updates itself**: when a newer release is out, **Update and restart** downloads it, puts it in
+  place of the app and reopens it, with your settings kept; Later hides it until the next one. The
+  version you run is at the bottom of the list.
 
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
 Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
@@ -283,6 +284,8 @@ Optional, for Claude agents and scripts: `http://127.0.0.1:47801`; `GET /` print
 | `POST /focus` | `{session}` | select its terminal tab (a VS Code session: its VS Code window) |
 | `GET /events` | | last 50 events and what fired |
 | `GET /sounds` | | playable sound names |
+| `GET /version` | | this app's version |
+| `POST /quit` | | closes the app (a newer version started while this one runs takes over) |
 
 `flash` flashes the session's terminal window (Agent Signals itself when there is no session, the
 session is in a terminal the app does not control, or on macOS); `raise` brings Agent Signals
@@ -326,7 +329,8 @@ Localhost only, no authentication: any local process can make it beep.
   AUMID under `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
 - Starts a terminal only when you reopen sessions: `wt` on Windows, Terminal.app on macOS.
 - Asks GitHub for the latest release at start and once a day (`api.github.com`, through the
-  system's `curl`): GitHub sees that request and your IP address, nothing else is sent.
+  system's `curl`), and downloads it from GitHub when you choose Update and restart: GitHub sees
+  those requests and your IP address, nothing else is sent.
 - The API listens on 127.0.0.1 only.
 
 ## License

@@ -129,6 +129,8 @@ pub struct State {
     /// A newer release on GitHub (`update`), and the version the user put off with Later (settings.json).
     pub update: Option<crate::update::Update>,
     pub skipped_update: String,
+    /// "Update and restart" under way, or why it failed.
+    pub install: crate::update::Install,
 }
 
 /// settings.json: what the user set in the window that is not a rule.

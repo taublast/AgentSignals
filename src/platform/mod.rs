@@ -15,7 +15,9 @@
 //!   session's folder open (match its title with `state::editor_title_is`); `Ok(false)`: none.
 //! - Updates: `http_get(url) -> Result<String>` (the body of a GET, through the system's curl, no
 //!   window), `open_url(url)` (the default browser), `UPDATE_ASSET` (how this system's release
-//!   download name ends).
+//!   download name ends), `download(url, file)`, `install_update(file)` (puts the downloaded
+//!   release in place of the running app and starts it once this process has exited; the caller
+//!   exits next), `clean_after_update()` (removes what the swap left, at the next start).
 //! - `pid_alive(pid)`.
 //! - Folders: `home_dir()` (where `.claude` lives), `data_dir()` (the per-user app data folder;
 //!   the app keeps its files in `AgentSignals` under it), `sound_dirs()` (system sounds),

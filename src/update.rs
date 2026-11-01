@@ -8,6 +8,16 @@ use std::time::Duration;
 const LATEST: &str = "https://api.github.com/repos/taublast/AgentSignals/releases/latest";
 const EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// Where "Update and restart" is: nothing asked yet, downloading, or failed with a reason (the
+/// banner then offers the download in the browser).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Install {
+    #[default]
+    Idle,
+    Downloading,
+    Failed(String),
+}
+
 /// A release newer than this build: its version and the download for this system.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Update {
@@ -19,6 +29,9 @@ pub struct Update {
 /// signals. No answer: nothing shows, the next check is a day later.
 pub fn start(shared: Shared) {
     std::thread::spawn(move || {
+        // What an update left behind (the replaced program), once the old instance is gone.
+        std::thread::sleep(Duration::from_secs(10));
+        platform::clean_after_update();
         loop {
             let found = platform::http_get(LATEST).ok().and_then(|json| newer(&json, env!("CARGO_PKG_VERSION"), platform::UPDATE_ASSET));
             if let Some(update) = found {
@@ -29,6 +42,26 @@ pub fn start(shared: Shared) {
                 }
             }
             std::thread::sleep(EVERY);
+        }
+    });
+}
+
+/// "Update and restart": downloads this system's file, puts it in place of the running app and
+/// starts it once this instance has closed. Any failure: the banner says why and offers the browser.
+pub fn install(shared: Shared, update: Update) {
+    let set = move |state: Install| {
+        let mut st = shared.lock().unwrap();
+        st.install = state;
+        st.version += 1;
+    };
+    set(Install::Downloading);
+    std::thread::spawn(move || {
+        let name = update.url.rsplit('/').next().unwrap_or("agentsignals-update");
+        let file = std::env::temp_dir().join(format!("{}-{name}", std::process::id()));
+        match platform::download(&update.url, &file).and_then(|()| platform::install_update(&file)) {
+            // The new version starts as soon as this one has closed.
+            Ok(()) => std::process::exit(0),
+            Err(why) => set(Install::Failed(why)),
         }
     });
 }
@@ -52,7 +85,7 @@ fn newer(json: &str, current: &str, asset: &str) -> Option<Update> {
 }
 
 /// "v0.6.5" or "0.6.5" to (0, 6, 5).
-fn version(text: &str) -> Option<(u32, u32, u32)> {
+pub(crate) fn version(text: &str) -> Option<(u32, u32, u32)> {
     let mut parts = text.trim().trim_start_matches('v').split(['.', '-']).map(|p| p.parse::<u32>().ok());
     Some((parts.next()??, parts.next()??, parts.next()??))
 }

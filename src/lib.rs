@@ -55,6 +55,7 @@ struct App {
     /// A newer release, and the version put off with Later: the banner shows the first unless it is the second.
     update: Option<update::Update>,
     skipped_update: String,
+    install: update::Install,
     /// The row under the mouse: `p<pid>` for a live session, `c<id>` for a closed one.
     hovered: Option<String>,
     /// What the rows were built from: rebuilt only when it changes.
@@ -139,6 +140,8 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                 SkiaStack::new().spacing(6).accessibility_role(Aria::LIST).accessibility_label("Sessions").assign(&mut app.session_stack),
                 section("Recent"),
                 label("", 12).text_color(hex(0x9CA3AF)).accessibility_role(Aria::TEXT).observe(|me, app: &App| me.set_text(recent(app))),
+                // Which build this is, at the very bottom of the list.
+                label(concat!("Version ", env!("CARGO_PKG_VERSION")), 12).text_color(hex(IDLE)).margin((4, 8, 0, 0)).accessibility_role(Aria::TEXT),
             ))),
         )),
     ))
@@ -221,17 +224,33 @@ fn update_banner() -> Build<SkiaShape> {
         .accessibility_role(Aria::REGION)
         .accessibility_label("Update")
         .children(SkiaStack::new().spacing(8).children((
-            label("", 14).text_color(Color::WHITE).accessibility_role(Aria::TEXT).accessibility_live(Aria::LIVE_POLITE).observe(move |me, app: &App| {
+            label("", 14).text_color(Color::WHITE).accessibility_role(Aria::TEXT).accessibility_live(Aria::LIVE_POLITE).observe(|me, app: &App| {
                 if let Some(u) = offered(app) {
-                    me.set_text(format!("Agent Signals {} is available", u.version));
+                    me.set_text(match &app.install {
+                        update::Install::Idle => format!("Agent Signals {} is available", u.version),
+                        update::Install::Downloading => format!("Downloading Agent Signals {}…", u.version),
+                        update::Install::Failed(why) => format!("Agent Signals {} could not be installed: {why}", u.version),
+                    });
                 }
             }),
-            SkiaRow::new().spacing(8).children((
-                button("Download", ACCENT).on_tapped(move |_me, app: &mut App, _cx| {
-                    if let Some(u) = offered(app) {
-                        platform::open_url(&u.url);
-                    }
-                }),
+            // While it downloads: no buttons. After a failure the browser takes over.
+            SkiaRow::new().spacing(8).observe(|me, app: &App| me.set_is_visible(app.install != update::Install::Downloading)).children((
+                button("Update and restart", ACCENT)
+                    .observe(|me, app: &App| me.set_is_visible(app.install == update::Install::Idle))
+                    .on_tapped(|_me, app: &mut App, _cx| {
+                        if let Some(u) = offered(app).cloned() {
+                            // The window's copy too, at once: the buttons go now, not at the next sync.
+                            app.install = update::Install::Downloading;
+                            update::install(app.shared.clone(), u);
+                        }
+                    }),
+                button("Download", ACCENT)
+                    .observe(|me, app: &App| me.set_is_visible(matches!(app.install, update::Install::Failed(_))))
+                    .on_tapped(|_me, app: &mut App, _cx| {
+                        if let Some(u) = offered(app) {
+                            platform::open_url(&u.url);
+                        }
+                    }),
                 button("Later", 0x3B4256).on_tapped(move |_me, app: &mut App, _cx| {
                     if let Some(version) = offered(app).map(|u| u.version.clone()) {
                         // The window's copy too, at once: the banner goes now, not at the next sync.
@@ -775,6 +794,7 @@ fn sync(app: &mut App, cx: &mut Cx) {
         app.tints = st.tints.clone();
         app.unseen = st.unseen.clone();
         app.update = st.update.clone();
+        app.install = st.install.clone();
         app.skipped_update = st.skipped_update.clone();
         drop(st);
         let key = (
@@ -810,7 +830,7 @@ pub fn run() {
         let log = std::fs::OpenOptions::new().create(true).append(true).open(state::data_dir().join("crash.log"));
         let _ = log.and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()));
     }));
-    let Some(listener) = http::bind() else {
+    let Some(listener) = http::bind().or_else(http::take_over) else {
         // Already running: wave from the running one instead. Another program on the port: say so,
         // never quit without a word.
         if !http::poke_running() {
@@ -847,6 +867,7 @@ pub fn run() {
             hovered: None,
             update: None,
             skipped_update: String::new(),
+            install: update::Install::Idle,
             root: Handle::default(),
             session_stack: Handle::default(),
             menu: None,
@@ -898,6 +919,7 @@ mod menu_keys {
             hovered: None,
             update: None,
             skipped_update: String::new(),
+            install: update::Install::Idle,
             root: Handle::default(),
             session_stack: Handle::default(),
             menu: None,
@@ -951,7 +973,7 @@ mod menu_keys {
         host.settle();
         let nodes = host.ui.accessibility_nodes();
         assert!(nodes.iter().any(|n| n.label == "Agent Signals 9.9.9 is available"));
-        for name in ["Download", "Later"] {
+        for name in ["Update and restart", "Later"] {
             assert!(nodes.iter().any(|n| n.role == Aria::BUTTON && n.label == name && n.can_interact), "{name} is a button");
         }
 

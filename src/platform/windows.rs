@@ -61,13 +61,15 @@ fn wt_args(cwd: &str, command: &[String], window: &str) -> Vec<String> {
     ["-w", window, "nt", "-d", cwd].iter().map(|a| a.to_string()).chain(command.iter().cloned()).map(|a| a.replace(';', "\\;")).collect()
 }
 
+/// Child processes without a console window.
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// How this build's download on a release is named at the end.
 pub const UPDATE_ASSET: &str = if cfg!(target_arch = "aarch64") { "-windows-arm64.exe" } else { "-windows-x64.exe" };
 
 /// A GET through the curl.exe Windows 10 and 11 ship, without a console window.
 pub fn http_get(url: &str) -> Result<String> {
     use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let out = std::process::Command::new("curl.exe")
         .args(["-sfL", "--max-time", "20", "-H", "User-Agent: AgentSignals", url])
         .creation_flags(CREATE_NO_WINDOW)
@@ -77,6 +79,56 @@ pub fn http_get(url: &str) -> Result<String> {
         return Err(format!("curl: {}", out.status));
     }
     String::from_utf8(out.stdout).map_err(|e| e.to_string())
+}
+
+/// Saves a download through curl.exe, without a console window.
+pub fn download(url: &str, file: &Path) -> Result<()> {
+    use std::os::windows::process::CommandExt;
+    let status = std::process::Command::new("curl.exe")
+        .args(["-sfL", "--max-time", "300", "-H", "User-Agent: AgentSignals", "-o"])
+        .arg(file)
+        .arg(url)
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|e| format!("curl: {e}"))?;
+    if status.success() { Ok(()) } else { Err("the download did not finish".into()) }
+}
+
+/// The running exe is renamed (Windows allows that), the new one takes its name, and a hidden
+/// PowerShell starts it once this process is gone. The exe's folder must be writable.
+pub fn install_update(file: &Path) -> Result<()> {
+    use std::os::windows::process::CommandExt;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let old = replaced(&exe);
+    let _ = std::fs::remove_file(&old);
+    std::fs::rename(&exe, &old).map_err(|e| format!("{} cannot be replaced: {e}", exe.display()))?;
+    if let Err(e) = std::fs::copy(file, &exe) {
+        let _ = std::fs::rename(&old, &exe);
+        return Err(format!("{} cannot be written: {e}", exe.display()));
+    }
+    let _ = std::fs::remove_file(file);
+    let script = format!(
+        "Wait-Process -Id {} -Timeout 30 -ErrorAction SilentlyContinue; Start-Process -FilePath '{}'",
+        std::process::id(),
+        exe.display().to_string().replace('\'', "''")
+    );
+    std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("the new version cannot be started: {e}"))
+}
+
+/// The exe an update replaced, next to the new one.
+fn replaced(exe: &Path) -> PathBuf {
+    exe.with_extension("exe.old")
+}
+
+pub fn clean_after_update() {
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::fs::remove_file(replaced(&exe));
+    }
 }
 
 /// Opens a web address in the default browser.

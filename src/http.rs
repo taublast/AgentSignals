@@ -23,6 +23,8 @@ POST   /tint            {session, color: \"#RRGGBB\"}  tint the session's row (e
 POST   /focus           {session}  select its terminal tab
 GET    /events          last 50 status changes and what fired
 GET    /sounds          playable sound names
+GET    /version         this app's version
+POST   /quit            closes the app (a newer version taking over)
 Text fields take {name} and {waiting}. Sounds: a name from GET /sounds or a full path to a sound file.
 ";
 
@@ -34,22 +36,41 @@ pub fn bind() -> Option<TcpListener> {
 /// Asks the instance already running to come to the front. False when what holds the port is
 /// not Agent Signals (another program, or nothing that answers).
 pub fn poke_running() -> bool {
-    let ask = |request: String| -> String {
-        let Ok(mut s) = TcpStream::connect_timeout(&(std::net::Ipv4Addr::LOCALHOST, PORT).into(), Duration::from_secs(2)) else { return String::new() };
-        let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
-        let _ = s.set_write_timeout(Some(Duration::from_secs(2)));
-        let mut answer = Vec::new();
-        if s.write_all(request.as_bytes()).is_ok() {
-            let _ = s.read_to_end(&mut answer);
-        }
-        String::from_utf8_lossy(&answer).into_owned()
-    };
     if !ask("GET / HTTP/1.1\r\n\r\n".into()).contains("Agent Signals API") {
         return false;
     }
     let body = r#"{"raise":true}"#;
     ask(format!("POST /signal HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()));
     true
+}
+
+/// A newer version started while an older one runs: the older one is asked to close, and its port
+/// taken over. `None` when what runs is not older (or too old to know /quit, or not the app).
+pub fn take_over() -> Option<TcpListener> {
+    let answer = ask("GET /version HTTP/1.1\r\n\r\n".into());
+    let running = answer.split("\r\n\r\n").nth(1).and_then(|body| serde_json::from_str::<Value>(body).ok())?;
+    let running = crate::update::version(running.get("version")?.as_str()?)?;
+    if running >= crate::update::version(env!("CARGO_PKG_VERSION"))? {
+        return None;
+    }
+    ask("POST /quit HTTP/1.1\r\nContent-Length: 0\r\n\r\n".into());
+    // It closes a moment after it answered.
+    (0..50).find_map(|_| {
+        std::thread::sleep(Duration::from_millis(100));
+        bind()
+    })
+}
+
+/// One request to the instance on the port; its whole answer, empty when nothing answers.
+fn ask(request: String) -> String {
+    let Ok(mut s) = TcpStream::connect_timeout(&(std::net::Ipv4Addr::LOCALHOST, PORT).into(), Duration::from_secs(2)) else { return String::new() };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = s.set_write_timeout(Some(Duration::from_secs(2)));
+    let mut answer = Vec::new();
+    if s.write_all(request.as_bytes()).is_ok() {
+        let _ = s.read_to_end(&mut answer);
+    }
+    String::from_utf8_lossy(&answer).into_owned()
 }
 
 pub fn start(listener: TcpListener, shared: Shared, tx: Sender<Cmd>) {
@@ -128,6 +149,15 @@ fn route(method: &str, path: &str, body: &[u8], shared: &Shared, tx: &Sender<Cmd
     let parse = |b: &[u8]| serde_json::from_slice::<Value>(if b.is_empty() { b"{}" } else { b });
     match (method, path) {
         ("GET", "/" | "/help") => ("200 OK", Value::String(HELP.into())),
+        ("GET", "/version") => ("200 OK", json!({ "version": env!("CARGO_PKG_VERSION") })),
+        ("POST", "/quit") => {
+            // After the answer has gone out.
+            std::thread::spawn(|| {
+                std::thread::sleep(Duration::from_millis(200));
+                std::process::exit(0);
+            });
+            ok
+        }
         ("GET", "/sessions") => {
             let st = shared.lock().unwrap();
             let list: Vec<Value> = st
