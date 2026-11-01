@@ -216,7 +216,10 @@ fn show_popup<T: Control + 'static>(app: &mut App, cx: &mut Cx, content: Build<T
     if let Some(open) = app.popup.take() {
         cx.close_popup_window(open);
     }
-    app.popup = Some(cx.open_popup_window(content, at, PopupWindowOptions { close_on_pointer_leave: true, ..Default::default() }));
+    // Drawn on the CPU: a transparent window on every GPU, so the round corners show the desktop.
+    // Small popups that change only on hover: the CPU upload is cheap.
+    let options = PopupWindowOptions { close_on_pointer_leave: true, cpu: true, ..Default::default() };
+    app.popup = Some(cx.open_popup_window(content, at, options));
 }
 
 /// The palette's colors, "None" first, then by hue; every one stays readable under white text.
