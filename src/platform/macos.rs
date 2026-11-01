@@ -48,21 +48,25 @@ pub fn download(url: &str, file: &Path) -> Result<()> {
     if status.success() { Ok(()) } else { Err("the download did not finish".into()) }
 }
 
-/// Unzips the release next to the temporary download, moves the running app bundle aside and the
-/// new one into its place, and a shell opens it once this process is gone. Only for the app
-/// bundle: a bare `cargo run` program has no bundle to replace.
+/// Unzips the release into a hidden folder next to the running app bundle (the same disk, so both
+/// moves are renames, also on an external disk), moves the running bundle aside into it and the new
+/// one into its place, and a shell opens it once this process is gone. Only for the app bundle: a
+/// bare `cargo run` program has no bundle to replace.
 pub fn install_update(zip: &Path) -> Result<()> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let bundle = exe.ancestors().nth(3).filter(|b| b.extension().is_some_and(|e| e == "app")).ok_or("not running from the app")?.to_path_buf();
-    let unpacked = zip.with_extension("unpacked");
-    let _ = std::fs::remove_dir_all(&unpacked);
+    let work = update_folder(&bundle);
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).map_err(|e| format!("{} cannot be written: {e}", work.display()))?;
+    let unpacked = work.join("new");
     let ok = Command::new("/usr/bin/ditto").args(["-x", "-k"]).arg(zip).arg(&unpacked).status().is_ok_and(|s| s.success());
+    let _ = std::fs::remove_file(zip);
     let new = std::fs::read_dir(&unpacked)
         .ok()
         .and_then(|d| d.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|e| e == "app")))
         .filter(|_| ok)
         .ok_or("the download could not be unpacked")?;
-    let old = unpacked.join("replaced.app");
+    let old = work.join("replaced.app");
     std::fs::rename(&bundle, &old).map_err(|e| format!("{} cannot be replaced: {e}", bundle.display()))?;
     if let Err(e) = std::fs::rename(&new, &bundle) {
         let _ = std::fs::rename(&old, &bundle);
@@ -77,8 +81,18 @@ pub fn install_update(zip: &Path) -> Result<()> {
         .map_err(|e| format!("the new version cannot be started: {e}"))
 }
 
-/// The replaced bundle sits in the temporary folder, which macOS empties by itself.
-pub fn clean_after_update() {}
+/// The hidden folder an update works in, next to the app bundle.
+fn update_folder(bundle: &Path) -> PathBuf {
+    bundle.with_file_name(".agentsignals-update")
+}
+
+/// The replaced bundle and the unpacked download, gone at the next start.
+pub fn clean_after_update() {
+    let exe = std::env::current_exe().ok();
+    if let Some(bundle) = exe.as_deref().and_then(|e| e.ancestors().nth(3)).filter(|b| b.extension().is_some_and(|e| e == "app")) {
+        let _ = std::fs::remove_dir_all(update_folder(bundle));
+    }
+}
 
 /// Opens a web address in the default browser.
 pub fn open_url(url: &str) {
