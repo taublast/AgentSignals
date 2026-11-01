@@ -5,6 +5,7 @@ mod http;
 mod restore;
 mod platform;
 mod state;
+mod update;
 mod worker;
 
 use drawnui::prelude::*;
@@ -51,6 +52,9 @@ struct App {
     tints: HashMap<String, u32>,
     /// Ids of sessions that finished and were not clicked since: their dots are red.
     unseen: std::collections::HashSet<String>,
+    /// A newer release, and the version put off with Later: the banner shows the first unless it is the second.
+    update: Option<update::Update>,
+    skipped_update: String,
     /// The row under the mouse: `p<pid>` for a live session, `c<id>` for a closed one.
     hovered: Option<String>,
     /// What the rows were built from: rebuilt only when it changes.
@@ -130,6 +134,7 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                 .keep_scroll_bars_visible(true)
                 .content(SkiaStack::new().padding((12, 0, 12, 16)).spacing(8).children((
                 reopen_banner(),
+                update_banner(),
                 // One Tab stop: the arrow keys move between the rows.
                 SkiaStack::new().spacing(6).accessibility_role(Aria::LIST).accessibility_label("Sessions").assign(&mut app.session_stack),
                 section("Recent"),
@@ -195,6 +200,46 @@ fn reopen_banner() -> Build<SkiaShape> {
                 }),
             )),
         )))
+}
+
+/// A newer release on GitHub: its download for this system, or Later (no banner for that version again).
+fn update_banner() -> Build<SkiaShape> {
+    SkiaShape::new()
+        .corner_radius(10)
+        .background_color(hex(0x1E2A44))
+        .stroke_color(hex(ACCENT))
+        .stroke_width(1.55)
+        .padding((12, 10, 12, 12))
+        .fill_x()
+        .observe(|me, app: &App| me.set_is_visible(offered(app).is_some()))
+        .accessibility_role(Aria::REGION)
+        .accessibility_label("Update")
+        .children(SkiaStack::new().spacing(8).children((
+            label("", 14).text_color(Color::WHITE).accessibility_role(Aria::TEXT).accessibility_live(Aria::LIVE_POLITE).observe(move |me, app: &App| {
+                if let Some(u) = offered(app) {
+                    me.set_text(format!("Agent Signals {} is available", u.version));
+                }
+            }),
+            SkiaRow::new().spacing(8).children((
+                SkiaButton::new("Download").font_size(13).background_color(hex(ACCENT)).on_tapped(move |_me, app: &mut App, _cx| {
+                    if let Some(u) = offered(app) {
+                        platform::open_url(&u.url);
+                    }
+                }),
+                SkiaButton::new("Later").font_size(13).background_color(hex(0x3B4256)).on_tapped(move |_me, app: &mut App, _cx| {
+                    if let Some(version) = offered(app).map(|u| u.version.clone()) {
+                        // The window's copy too, at once: the banner goes now, not at the next sync.
+                        app.skipped_update = version.clone();
+                        app.shared.lock().unwrap().skip_update(&version);
+                    }
+                }),
+            )),
+        )))
+}
+
+/// The release the banner offers: the newer one, unless the user chose Later for it.
+fn offered(app: &App) -> Option<&update::Update> {
+    app.update.as_ref().filter(|u| u.version != app.skipped_update)
 }
 
 /// Opens a session's menu where the right click was, in a popup window of its own: it may reach
@@ -723,6 +768,8 @@ fn sync(app: &mut App, cx: &mut Cx) {
         app.inactive = st.inactive.clone();
         app.tints = st.tints.clone();
         app.unseen = st.unseen.clone();
+        app.update = st.update.clone();
+        app.skipped_update = st.skipped_update.clone();
         drop(st);
         let key = (
             app.sessions.iter().map(|s| (s.pid, s.name.clone())).collect::<Vec<_>>(),
@@ -765,6 +812,7 @@ pub fn run() {
     let shared: Shared = Arc::new(Mutex::new(State::load()));
     let tx = worker::start(shared.clone());
     http::start(listener, shared.clone(), tx.clone());
+    update::start(shared.clone());
     let _ = STARTED.set((shared, tx));
     drawnui::run_sized(TITLE, 380.0, 640.0, || {
         let (shared, tx) = STARTED.get().unwrap().clone();
@@ -785,6 +833,8 @@ pub fn run() {
             tints: HashMap::new(),
             unseen: Default::default(),
             hovered: None,
+            update: None,
+            skipped_update: String::new(),
             root: Handle::default(),
             session_stack: Handle::default(),
             menu: None,
@@ -834,6 +884,8 @@ mod menu_keys {
             tints: HashMap::new(),
             unseen: Default::default(),
             hovered: None,
+            update: None,
+            skipped_update: String::new(),
             root: Handle::default(),
             session_stack: Handle::default(),
             menu: None,
@@ -841,7 +893,7 @@ mod menu_keys {
             button: MouseButton::Left,
             size: Size::default(),
         };
-        let mut host = Headless::new(Ui::new(app, |_: &mut App| SkiaLayout::new().fill()), 600, 600, 1.0);
+        let mut host = Headless::new(Ui::new(app, build), 600, 600, 1.0);
         host.ui.set_keyboard_navigation(true);
         host.ui.set_accessibility_enabled(true);
         host.settle();
@@ -880,6 +932,12 @@ mod menu_keys {
         host.settle();
         assert_eq!(focused(&host), "None", "the palette opens on the current tint");
         assert_eq!(key(&mut host, "ArrowRight"), "Orange");
+
+        // A newer release shows the update banner, read out with its version.
+        host.ui.state.update = Some(update::Update { version: "9.9.9".into(), url: "https://example.invalid".into() });
+        host.ui.state_changed();
+        host.settle();
+        assert!(host.ui.accessibility_nodes().iter().any(|n| n.label == "Agent Signals 9.9.9 is available"));
 
         // A signal that is on is not a current choice: the menu still opens on its first item.
         let say: Rule = serde_json::from_str(r#"{"session":"api","on":"finished","say":"{name} finished"}"#).unwrap();

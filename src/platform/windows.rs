@@ -61,6 +61,29 @@ fn wt_args(cwd: &str, command: &[String], window: &str) -> Vec<String> {
     ["-w", window, "nt", "-d", cwd].iter().map(|a| a.to_string()).chain(command.iter().cloned()).map(|a| a.replace(';', "\\;")).collect()
 }
 
+/// How this build's download on a release is named at the end.
+pub const UPDATE_ASSET: &str = if cfg!(target_arch = "aarch64") { "-windows-arm64.exe" } else { "-windows-x64.exe" };
+
+/// A GET through the curl.exe Windows 10 and 11 ship, without a console window.
+pub fn http_get(url: &str) -> Result<String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let out = std::process::Command::new("curl.exe")
+        .args(["-sfL", "--max-time", "20", "-H", "User-Agent: AgentSignals", url])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("curl: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("curl: {}", out.status));
+    }
+    String::from_utf8(out.stdout).map_err(|e| e.to_string())
+}
+
+/// Opens a web address in the default browser.
+pub fn open_url(url: &str) {
+    let _ = std::process::Command::new("explorer.exe").arg(url).spawn();
+}
+
 pub fn open_session(cwd: &str, command: &[String], group: Option<&str>) -> Result<()> {
     let mut wt = std::process::Command::new("wt");
     wt.args(wt_args(cwd, command, group.unwrap_or("0")));

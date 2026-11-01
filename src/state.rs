@@ -126,6 +126,9 @@ pub struct State {
     /// Ids of sessions that finished and were not clicked since: a red dot until
     /// the user clicks the row (or its notification), or the session works again.
     pub unseen: std::collections::HashSet<String>,
+    /// A newer release on GitHub (`update`), and the version the user put off with Later (settings.json).
+    pub update: Option<crate::update::Update>,
+    pub skipped_update: String,
 }
 
 /// settings.json: what the user set in the window that is not a rule.
@@ -134,6 +137,9 @@ struct Settings {
     /// Session name to "#RRGGBB".
     #[serde(default)]
     tints: std::collections::BTreeMap<String, String>,
+    /// The release the user chose Later for: its banner stays away until a newer one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    skipped_update: String,
 }
 
 /// "#RRGGBB" (or "RRGGBB") to 0xRRGGBB.
@@ -151,7 +157,26 @@ impl State {
         let rules: Vec<Rule> = std::fs::read(rules_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let settings: Settings = std::fs::read(settings_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let tints = settings.tints.iter().filter_map(|(name, c)| Some((name.to_lowercase(), parse_color(c)?))).collect();
-        State { rules, tints, ..State::default() }
+        State { rules, tints, skipped_update: settings.skipped_update, ..State::default() }
+    }
+
+    /// Later on the update banner: no banner for this version again.
+    pub fn skip_update(&mut self, version: &str) {
+        self.skipped_update = version.to_string();
+        self.version += 1;
+        self.save_settings();
+    }
+
+    fn save_settings(&self) {
+        let settings = Settings {
+            tints: self.tints.iter().map(|(n, c)| (n.clone(), color_text(*c))).collect(),
+            skipped_update: self.skipped_update.clone(),
+        };
+        let path = settings_path();
+        let _ = std::fs::create_dir_all(path.parent().unwrap());
+        if let Err(e) = std::fs::write(&path, serde_json::to_vec_pretty(&settings).unwrap()) {
+            eprintln!("saving {}: {e}", path.display());
+        }
     }
 
     /// Tints a session's row (`None`: back to the plain row) and saves it.
@@ -161,12 +186,7 @@ impl State {
             None => self.tints.remove(&name.to_lowercase()),
         };
         self.version += 1;
-        let settings = Settings { tints: self.tints.iter().map(|(n, c)| (n.clone(), color_text(*c))).collect() };
-        let path = settings_path();
-        let _ = std::fs::create_dir_all(path.parent().unwrap());
-        if let Err(e) = std::fs::write(&path, serde_json::to_vec_pretty(&settings).unwrap()) {
-            eprintln!("saving {}: {e}", path.display());
-        }
+        self.save_settings();
     }
 
     pub fn add_rule(&mut self, mut rule: Rule) -> u32 {

@@ -22,6 +22,25 @@ const RECORD: char = '\u{2}';
 
 pub const SOUND_EXTENSIONS: &[&str] = &["aiff", "wav"];
 pub const FINISHED_SOUND: &str = "Glass";
+/// How this build's download on a release is named at the end.
+pub const UPDATE_ASSET: &str = "-macos-universal.zip";
+
+/// A GET through the system's curl.
+pub fn http_get(url: &str) -> Result<String> {
+    let out = Command::new("/usr/bin/curl")
+        .args(["-sfL", "--max-time", "20", "-H", "User-Agent: AgentSignals", url])
+        .output()
+        .map_err(|e| format!("curl: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("curl: {}", out.status));
+    }
+    String::from_utf8(out.stdout).map_err(|e| e.to_string())
+}
+
+/// Opens a web address in the default browser.
+pub fn open_url(url: &str) {
+    let _ = Command::new("open").arg(url).spawn();
+}
 /// macOS installs it as a plain executable; the native installer and both Homebrew prefixes below.
 pub const CLAUDE_PROGRAMS: &[&str] = &["claude"];
 

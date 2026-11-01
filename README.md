@@ -19,6 +19,8 @@ through tabs to find out.
 - **Full accessibility**: use it with the keyboard (Tab and the arrow keys) and with screen
   readers. Every session reads its name, its status and what a click does; menus read which
   signals are on.
+- **Knows about new versions**: when a newer release is out, a banner offers its download for your
+  system; Later hides it until the next one.
 
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
 Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
@@ -318,12 +320,14 @@ Localhost only, no authentication: any local process can make it beep.
 - Reads `~/.claude/sessions/*.json` (Claude Code's list of live sessions) and, from
   each session's transcript, its first lines (start folder), its last lines (permission mode) and,
   for a session without a name of its own, its title.
-- Writes `rules.json`, `settings.json` (row tints), `sessions.json` (the terminal sessions; closed ones stay until you remove
+- Writes `rules.json`, `settings.json` (row tints, the version you chose Later for), `sessions.json` (the terminal sessions; closed ones stay until you remove
   them) and, after a crash, `crash.log` in its folder (`%APPDATA%\AgentSignals` on Windows,
   `~/Library/Application Support/AgentSignals` on macOS). On Windows it registers the notification
   AUMID under `HKCU\Software\Classes\AppUserModelId\AgentSignals`.
 - Starts a terminal only when you reopen sessions: `wt` on Windows, Terminal.app on macOS.
-- Sends nothing anywhere: the API listens on 127.0.0.1 only.
+- Asks GitHub for the latest release at start and once a day (`api.github.com`, through the
+  system's `curl`): GitHub sees that request and your IP address, nothing else is sent.
+- The API listens on 127.0.0.1 only.
 
 ## License
 
