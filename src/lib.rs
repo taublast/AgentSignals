@@ -82,6 +82,8 @@ struct AnswersView {
     live: bool,
     list: Option<Result<Vec<answers::Answer>, String>>,
     filter: String,
+    /// The entries the search lets through, as indexes into `list`: what the recycled cells show.
+    shown: Vec<usize>,
     open: Option<usize>,
     copied: bool,
 }
@@ -290,7 +292,7 @@ fn open_answers(app: &mut App, cx: &mut Cx) {
             None => return,
         },
     };
-    app.answers = Some(AnswersView { id: id.clone(), name: m.name, live, list: None, filter: String::new(), open: None, copied: false });
+    app.answers = Some(AnswersView { id: id.clone(), name: m.name, live, list: None, filter: String::new(), shown: Vec::new(), open: None, copied: false });
     fill_answers(app, cx);
     let shared = app.shared.clone();
     shared.lock().unwrap().answers = None;
@@ -302,41 +304,83 @@ fn open_answers(app: &mut App, cx: &mut Cx) {
     });
 }
 
-/// The panel's entries for its search, newest first.
-// ponytail: the first 200 matches only; a search narrows a longer conversation.
+/// The entries the search lets through, newest first; the recycled cells show them again.
 fn fill_answers(app: &mut App, cx: &mut Cx) {
-    cx.clear_children(app.answers_list);
-    let Some(Some(Ok(list))) = app.answers.as_ref().map(|v| v.list.as_ref()) else { return };
-    let filter = app.answers.as_ref().map_or("", |v| v.filter.as_str());
-    for (index, entry) in answers::matching(list, filter).into_iter().take(200) {
-        cx.add_child(app.answers_list, answer_row(index, entry));
+    if let Some(view) = &mut app.answers {
+        view.shown = match &view.list {
+            Some(Ok(list)) => answers::matching(list, &view.filter).into_iter().map(|(i, _)| i).collect(),
+            _ => Vec::new(),
+        };
     }
+    cx.items_reset(app.answers_list);
 }
 
-/// One entry: the question on one line, the start of the answer on two; a click opens the answer.
-fn answer_row(index: usize, entry: &answers::Answer) -> Build<SkiaShape> {
-    let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let (question, answer) = (flat(&entry.question), flat(&entry.answer));
-    SkiaShape::new()
+/// A recycled entry cell: the parts its bind fills, and the entry it shows now (for the click).
+struct AnswerCell {
+    cell: Handle<SkiaShape>,
+    question: Handle<SkiaLabel>,
+    when: Handle<SkiaLabel>,
+    answer: Handle<SkiaLabel>,
+    index: std::rc::Rc<std::cell::Cell<usize>>,
+}
+
+/// One entry: the question and when it was asked on a quiet line, the answer, which is what is
+/// looked for, on two brighter lines; a click opens the answer.
+fn answer_cell() -> (Build<SkiaShape>, AnswerCell) {
+    let index = std::rc::Rc::new(std::cell::Cell::new(0));
+    let mut handles = AnswerCell { cell: Handle::default(), question: Handle::default(), when: Handle::default(), answer: Handle::default(), index: index.clone() };
+    let cell = SkiaShape::new()
         .corner_radius(8)
         .background_color(hex(ROW))
         .padding((10, 8, 10, 8))
         .fill_x()
         .accessibility_role(Aria::BUTTON)
-        .accessibility_label(question.clone())
         .accessibility_hint("Opens the full answer")
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .on_hovered(|me, _app: &mut App, _cx, on| me.set_background_color(row_color(None, false, on)))
         .on_tapped(move |_me, app: &mut App, _cx| {
             if let Some(view) = &mut app.answers {
-                view.open = Some(index);
+                view.open = view.shown.get(index.get()).copied();
                 view.copied = false;
             }
         })
-        .children(SkiaStack::new().spacing(2).children((
-            label(&question, 13).text_color(Color::WHITE).max_lines(1),
-            label(&answer, 12).text_color(hex(0x9CA3AF)).max_lines(2),
-        )))
+        .assign(&mut handles.cell)
+        .children(SkiaStack::new().spacing(3).children((
+            SkiaGrid::new().fill_x().column_definitions("*, Auto").column_spacing(8).children((
+                label("", 12).text_color(hex(0x9CA3AF)).max_lines(1).assign(&mut handles.question),
+                label("", 12).text_color(hex(IDLE)).column(1).assign(&mut handles.when),
+            )),
+            label("", 13).text_color(Color::WHITE).max_lines(2).assign(&mut handles.answer),
+        )));
+    (cell, handles)
+}
+
+fn bind_answer(cell: &AnswerCell, app: &App, row: usize, cx: &mut Cx) {
+    let Some(view) = &app.answers else { return };
+    let Some(Ok(list)) = &view.list else { return };
+    let Some(entry) = view.shown.get(row).and_then(|&i| list.get(i)) else { return };
+    cell.index.set(row);
+    let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let (question, answer) = (flat(&entry.question), flat(&entry.answer));
+    if let Some(mut me) = cx.get_mut(cell.cell) {
+        // The answer first, as on screen; then the question it answers.
+        let when = asked(app, entry);
+        me.set_accessibility_label(if when.is_empty() { format!("{answer} Question: {question}") } else { format!("{answer} Asked {when}: {question}") });
+    }
+    if let Some(mut me) = cx.get_mut(cell.question) {
+        me.set_text(question);
+    }
+    if let Some(mut me) = cx.get_mut(cell.when) {
+        me.set_text(asked(app, entry));
+    }
+    if let Some(mut me) = cx.get_mut(cell.answer) {
+        me.set_text(answer);
+    }
+}
+
+/// When a question was asked: "5m ago", empty when the transcript has no time for it.
+fn asked(app: &App, entry: &answers::Answer) -> String {
+    if entry.at_ms == 0 { String::new() } else { format!("{} ago", state::age(app.now.saturating_sub(entry.at_ms))) }
 }
 
 /// The open answer, if any.
@@ -410,7 +454,15 @@ fn answers_panel(app: &mut App) -> Build<SkiaShape> {
                             .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
                             .scroll_bar_thumb_color(hex(0x4B5563))
                             .scroll_bar_track_color(Color::new(0x14FFFFFF))
-                            .content(SkiaStack::new().spacing(6).padding((0, 0, 10, 0)).accessibility_role(Aria::LIST).accessibility_label("Questions and answers").assign(&mut app.answers_list)),
+                            .content(
+                                SkiaStack::new()
+                                    .spacing(6)
+                                    .padding((0, 0, 10, 0))
+                                    .accessibility_role(Aria::LIST)
+                                    .accessibility_label("Questions and answers")
+                                    .assign(&mut app.answers_list)
+                                    .items(|app: &App| app.answers.as_ref().map_or(0, |v| v.shown.len()), answer_cell, bind_answer),
+                            ),
                     )),
                     // One answer in full: the question above it, the text selectable.
                     SkiaScroll::new()
@@ -421,6 +473,11 @@ fn answers_panel(app: &mut App) -> Build<SkiaShape> {
                         .scroll_bar_track_color(Color::new(0x14FFFFFF))
                         .observe(|me, app: &App| me.set_is_visible(opened(app).is_some()))
                         .content(SkiaStack::new().spacing(10).padding((0, 0, 10, 0)).children((
+                            label("", 12).text_color(hex(IDLE)).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
+                                let when = opened(app).map(|e| asked(app, e)).unwrap_or_default();
+                                me.set_is_visible(!when.is_empty());
+                                me.set_text(when);
+                            }),
                             label("", 13).text_color(hex(0x9CA3AF)).accessibility_role(Aria::TEXT).accessibility_text_selectable(true).observe(|me, app: &App| {
                                 if let Some(entry) = opened(app) {
                                     me.set_text(entry.question.clone());
@@ -1178,21 +1235,22 @@ mod menu_keys {
     fn last_answers_panel() {
         let mut host = host(Vec::new());
         let list = vec![
-            answers::Answer { question: "where are the logs?".into(), answer: "In C:\\logs, one file a day.".into() },
-            answers::Answer { question: "how do I deploy?".into(), answer: "Run dev/deploy.ps1 from the repo.".into() },
+            answers::Answer { question: "where are the logs?".into(), answer: "In C:\\logs, one file a day.".into(), at_ms: 0 },
+            answers::Answer { question: "how do I deploy?".into(), answer: "Run dev/deploy.ps1 from the repo.".into(), at_ms: 0 },
         ];
-        host.ui.state.answers = Some(AnswersView { id: "a".into(), name: "api".into(), live: true, list: Some(Ok(list)), filter: String::new(), open: None, copied: false });
+        host.ui.state.answers = Some(AnswersView { id: "a".into(), name: "api".into(), live: true, list: Some(Ok(list)), filter: String::new(), shown: Vec::new(), open: None, copied: false });
         fill_answers(&mut host.ui.state, &mut host.ui.tree.cx());
         host.ui.state_changed();
         host.settle();
         let has = |host: &Headless<App>, role: &str, label: &str| host.ui.accessibility_nodes().iter().any(|n| n.role == role && n.label == label);
-        assert!(has(&host, Aria::BUTTON, "where are the logs?") && has(&host, Aria::BUTTON, "how do I deploy?"));
+        let (logs, deploy) = ("In C:\\logs, one file a day. Question: where are the logs?", "Run dev/deploy.ps1 from the repo. Question: how do I deploy?");
+        assert!(has(&host, Aria::BUTTON, logs) && has(&host, Aria::BUTTON, deploy));
 
         host.ui.state.answers.as_mut().unwrap().filter = "deploy".into();
         fill_answers(&mut host.ui.state, &mut host.ui.tree.cx());
         host.ui.state_changed();
         host.settle();
-        assert!(!has(&host, Aria::BUTTON, "where are the logs?") && has(&host, Aria::BUTTON, "how do I deploy?"));
+        assert!(!has(&host, Aria::BUTTON, logs) && has(&host, Aria::BUTTON, deploy));
 
         host.ui.state.answers.as_mut().unwrap().open = Some(1);
         host.ui.state_changed();

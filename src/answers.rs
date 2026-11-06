@@ -9,6 +9,8 @@ use std::io::BufRead;
 pub struct Answer {
     pub question: String,
     pub answer: String,
+    /// When the question was asked, epoch ms (0: unknown).
+    pub at_ms: u64,
 }
 
 /// The session's questions and answers, newest first. Read on the caller's thread: a long
@@ -45,7 +47,8 @@ fn parse(lines: impl BufRead) -> Vec<Answer> {
         if user {
             // Commands, their output and messages from other sessions start with a tag.
             if !text.starts_with('<') {
-                list.push(Answer { question: text.to_string(), answer: String::new() });
+                let at_ms = record.get("timestamp").and_then(Value::as_str).and_then(epoch_ms).unwrap_or(0);
+                list.push(Answer { question: text.to_string(), answer: String::new(), at_ms });
             }
         } else if let Some(last) = list.last_mut() {
             last.answer = text.to_string();
@@ -53,6 +56,23 @@ fn parse(lines: impl BufRead) -> Vec<Answer> {
     }
     list.retain(|a| !a.answer.is_empty());
     list
+}
+
+/// "2026-11-06T06:41:04.738Z" (UTC, as Claude Code writes it) to epoch ms.
+fn epoch_ms(text: &str) -> Option<u64> {
+    let n = |range: std::ops::Range<usize>| text.get(range)?.parse::<i64>().ok();
+    let (y, m, d, hh, mm, ss) = (n(0..4)?, n(5..7)?, n(8..10)?, n(11..13)?, n(14..16)?, n(17..19)?);
+    // The fraction as milliseconds: ".5" is 500.
+    let fraction: String = text.get(19..).and_then(|r| r.strip_prefix('.')).map_or(String::new(), |r| r.chars().take_while(char::is_ascii_digit).take(3).collect());
+    let ms = format!("{fraction:0<3}").parse::<i64>().unwrap_or(0);
+    // Days from 1970-01-01 to the date (Howard Hinnant's days_from_civil).
+    let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * m + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    u64::try_from(((days * 24 + hh) * 60 + mm) * 60_000 + ss * 1000 + ms).ok()
 }
 
 /// A message's text: the string itself, or its text blocks joined (tool calls and results have none).
@@ -87,7 +107,7 @@ mod tests {
     fn questions_and_their_final_answers() {
         let lines = [
             r#"{"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>"}}"#,
-            r#"{"type":"user","message":{"role":"user","content":"how do I deploy?"}}"#,
+            r#"{"type":"user","timestamp":"2026-11-06T06:41:04.738Z","message":{"role":"user","content":"how do I deploy?"}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Checking the scripts."}]}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}"#,
             r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}"#,
@@ -103,13 +123,15 @@ mod tests {
         assert_eq!(
             list,
             [
-                Answer { question: "how do I deploy?".into(), answer: "Run dev/deploy.ps1.".into() },
-                Answer { question: "and the logs?".into(), answer: "In C:\\logs.".into() },
+                Answer { question: "how do I deploy?".into(), answer: "Run dev/deploy.ps1.".into(), at_ms: 1_793_947_264_738 },
+                Answer { question: "and the logs?".into(), answer: "In C:\\logs.".into(), at_ms: 0 },
             ]
         );
         let found = matching(&list, "DEPLOY run");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].0, 0);
         assert_eq!(matching(&list, "").len(), 2);
+        assert_eq!(epoch_ms("1970-01-01T00:00:01Z"), Some(1000));
+        assert_eq!(epoch_ms("2000-03-01T00:00:00.5Z"), Some(951_868_800_500));
     }
 }
