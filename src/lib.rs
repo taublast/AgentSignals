@@ -315,32 +315,34 @@ fn fill_answers(app: &mut App, cx: &mut Cx) {
     cx.items_reset(app.answers_list);
 }
 
-/// A recycled entry cell: the parts its bind fills, and the entry it shows now (for the click).
+/// The parts of a recycled entry cell that its bind fills.
+#[derive(Default)]
 struct AnswerCell {
     cell: Handle<SkiaShape>,
     question: Handle<SkiaLabel>,
     when: Handle<SkiaLabel>,
     answer: Handle<SkiaLabel>,
-    index: std::rc::Rc<std::cell::Cell<usize>>,
 }
 
 /// One entry: the question and when it was asked on a quiet line, the answer, which is what is
 /// looked for, on two brighter lines; a click opens the answer.
 fn answer_cell() -> (Build<SkiaShape>, AnswerCell) {
-    let index = std::rc::Rc::new(std::cell::Cell::new(0));
-    let mut handles = AnswerCell { cell: Handle::default(), question: Handle::default(), when: Handle::default(), answer: Handle::default(), index: index.clone() };
+    let mut handles = AnswerCell::default();
     let cell = SkiaShape::new()
         .corner_radius(8)
         .background_color(hex(ROW))
         .padding((10, 8, 10, 8))
         .fill_x()
+        // One bitmap per cell, blitted while scrolling; the ripple is drawn over it.
+        .use_cache(CacheType::Image)
         .accessibility_role(Aria::BUTTON)
         .accessibility_hint("Opens the full answer")
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .on_hovered(|me, _app: &mut App, _cx, on| me.set_background_color(row_color(None, false, on)))
-        .on_tapped(move |_me, app: &mut App, _cx| {
+        .on_tapped(|me, app: &mut App, _cx| {
+            let row = me.base().context_index;
             if let Some(view) = &mut app.answers {
-                view.open = view.shown.get(index.get()).copied();
+                view.open = row.and_then(|row| view.shown.get(row).copied());
                 view.copied = false;
             }
         })
@@ -359,7 +361,6 @@ fn bind_answer(cell: &AnswerCell, app: &App, row: usize, cx: &mut Cx) {
     let Some(view) = &app.answers else { return };
     let Some(Ok(list)) = &view.list else { return };
     let Some(entry) = view.shown.get(row).and_then(|&i| list.get(i)) else { return };
-    cell.index.set(row);
     let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
     let (question, answer) = (flat(&entry.question), flat(&entry.answer));
     if let Some(mut me) = cx.get_mut(cell.cell) {
@@ -455,7 +456,10 @@ fn answers_panel(app: &mut App) -> Build<SkiaShape> {
                             .scroll_bar_thumb_color(hex(0x4B5563))
                             .scroll_bar_track_color(Color::new(0x14FFFFFF))
                             .content(
+                                // Recycled cells, measured as they come into view: rows differ in height.
                                 SkiaStack::new()
+                                    .recycling_template(RecyclingTemplate::Enabled)
+                                    .measure_items_strategy(MeasuringStrategy::MeasureVisible)
                                     .spacing(6)
                                     .padding((0, 0, 10, 0))
                                     .accessibility_role(Aria::LIST)
