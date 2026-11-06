@@ -175,7 +175,12 @@ pub fn question(text: &str) -> Option<String> {
             break;
         }
     }
-    let heading = lines.iter().position(|l| l.to_lowercase().contains("open question"))?;
+    // The heading is a short label line ("Open questions:", "## Still open questions"), not a
+    // sentence that mentions open questions.
+    let heading = lines.iter().position(|l| {
+        let label = clean(l).to_lowercase();
+        label.contains("open question") && label.chars().count() <= 40 && (label.ends_with(':') || l.trim_start().starts_with('#'))
+    })?;
     lines[heading + 1..].iter().find(|l| !l.trim().is_empty()).map(|l| clean(l)).or_else(|| Some(clean(lines[heading])))
 }
 
@@ -213,6 +218,10 @@ mod tests {
         // The last paragraph is the options; the question is just above them.
         assert_eq!(question("Built.\n\nWhich one should I ship?\n\n1. Windows now\n2. Wait for the Mac"), Some("Which one should I ship?".into()));
         assert_eq!(question("Two ways:\n\n- A) one\n- B) two"), None);
+        // Prose that mentions an "Open questions" heading is not one.
+        let report = "Rules:\n4. Fallback: the first item under an \"Open questions\" heading.\n\nTested on five sessions:\n\nAll committed, not pushed.";
+        assert_eq!(question(report), None);
+        assert_eq!(question("Done.\n\n## Open questions\n- the icon"), Some("the icon".into()));
         // A question followed by the sources list a web search adds.
         assert_eq!(question("Can you type that in its session?\n\nSources:\n- [One](https://a.dev/x?y=1)\n- [Two](https://b.dev)"), Some("Can you type that in its session?".into()));
     }
