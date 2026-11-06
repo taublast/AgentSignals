@@ -1,4 +1,4 @@
-//! A session's questions and Claude's answers, read from its transcript: what the "Last answers"
+//! A session's questions and Claude's answers, read from its transcript: what the "Answers"
 //! panel lists, newest first, to find an answer lost far up in a long conversation.
 
 use serde_json::Value;

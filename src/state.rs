@@ -131,13 +131,13 @@ pub struct State {
     pub skipped_update: String,
     /// "Update and restart" under way, or why it failed.
     pub install: crate::update::Install,
-    /// Answers the user pinned in Last answers, kept in pins.json with their text.
+    /// Answers the user pinned in Answers, kept in pins.json with their text.
     pub pins: Vec<Pin>,
-    /// The questions and answers of the session the Last answers panel shows (its id), once read.
+    /// The questions and answers of the session the Answers screen shows (its id), once read.
     pub answers: Option<(String, Result<Vec<crate::answers::Answer>, String>)>,
 }
 
-/// An answer the user pinned: it stays first in its session's Last answers, also when the
+/// An answer the user pinned: it stays first in its session's Answers, also when the
 /// conversation file is cut or gone, so its text is kept here.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Pin {

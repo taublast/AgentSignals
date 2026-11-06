@@ -59,7 +59,7 @@ struct App {
     install: update::Install,
     /// Pinned answers of every session (copy of the shared state).
     pins: Vec<state::Pin>,
-    /// The Last answers panel while it is open, and the column its entries go in.
+    /// The Answers screen while it is open, and the column its entries go in.
     answers: Option<AnswersView>,
     answers_list: Handle<SkiaLayout>,
     /// The row under the mouse: `p<pid>` for a live session, `c<id>` for a closed one.
@@ -76,7 +76,7 @@ struct App {
     size: Size,
 }
 
-/// The Last answers panel: whose answers, the list once read, the search, the one open.
+/// The Answers screen: whose answers, the list once read, the search, the one open.
 struct AnswersView {
     id: String,
     name: String,
@@ -87,6 +87,9 @@ struct AnswersView {
     /// The entries the search lets through, as indexes into `list`: what the recycled cells show.
     shown: Vec<usize>,
     open: Option<usize>,
+    /// The entry whose right-click menu is open.
+    menu: Option<usize>,
+    /// Copy was chosen for the open answer.
     copied: bool,
 }
 
@@ -283,7 +286,7 @@ fn update_banner() -> Build<SkiaShape> {
         )))
 }
 
-/// Opens the Last answers panel for the menu's session and reads its conversation on a thread of
+/// Opens the Answers screen for the menu's session and reads its conversation on a thread of
 /// its own (a long one is hundreds of MB); the list fills when it is read.
 fn open_answers(app: &mut App, cx: &mut Cx) {
     let Some(m) = app.menu.take() else { return };
@@ -294,7 +297,7 @@ fn open_answers(app: &mut App, cx: &mut Cx) {
             None => return,
         },
     };
-    app.answers = Some(AnswersView { id: id.clone(), name: m.name, live, list: None, filter: String::new(), shown: Vec::new(), open: None, copied: false });
+    app.answers = Some(AnswersView { id: id.clone(), name: m.name, live, list: None, filter: String::new(), shown: Vec::new(), open: None, menu: None, copied: false });
     fill_answers(app, cx);
     let shared = app.shared.clone();
     shared.lock().unwrap().answers = None;
@@ -376,6 +379,15 @@ fn answer_cell() -> (Build<SkiaShape>, AnswerCell) {
                 view.copied = false;
             }
         })
+        .on_context_menu(|me, app: &mut App, cx, at| {
+            let row = me.base().context_index;
+            let Some(view) = &mut app.answers else { return false };
+            view.menu = row.and_then(|row| view.shown.get(row).copied());
+            if view.menu.is_some() {
+                show_popup(app, cx, answer_menu_panel(), at.location);
+            }
+            true
+        })
         .assign(&mut handles.cell)
         .children(SkiaStack::new().spacing(3).children((
             SkiaGrid::new().fill_x().column_definitions("*, Auto").column_spacing(8).children((
@@ -424,143 +436,265 @@ fn opened(app: &App) -> Option<&answers::Answer> {
     list.get(view.open?)
 }
 
-/// Last answers: over the whole window, the session's questions and answers with a search; a click
-/// shows one answer in full, to read, select and copy.
+/// Answers: a screen over the whole window. A header with Back and whose answers they are; then
+/// the search and the list, or one answer in full under a toolbar (Pin, Copy, Go to session).
 fn answers_panel(app: &mut App) -> Build<SkiaShape> {
+    let listing = |app: &App| app.answers.as_ref().is_some_and(|v| v.open.is_none());
     SkiaShape::new()
         .fill()
-        .background_color(Color::new(0xE612_141C))
-        .padding((10, 10, 10, 10))
-        .observe(|me, app: &App| me.set_is_visible(app.answers.is_some()))
+        .background_color(hex(0x12141C))
+        .padding((12, 10, 12, 12))
+        .observe(|me, app: &App| {
+            me.set_is_visible(app.answers.is_some());
+            if let Some(view) = &app.answers {
+                me.set_accessibility_label(format!("Answers of {}", view.name));
+            }
+        })
         .accessibility_role(Aria::DIALOG)
-        .children(
-            SkiaShape::new()
-                .fill()
-                .corner_radius(10)
-                .background_color(hex(0x1C2030))
+        .children(SkiaGrid::new().fill().column_definitions("*").row_definitions("Auto, Auto, *").row_spacing(10).children((
+            // Header: Back, then the title and the session.
+            SkiaGrid::new().fill_x().column_definitions("Auto, *").column_spacing(10).row(0).children((
+                back_button(),
+                SkiaStack::new().column(1).spacing(0).vertical_options(LayoutOptions::Center).children((
+                    label("Answers", 16).text_color(Color::WHITE).accessibility_role(Aria::HEADING),
+                    label("", 12).text_color(hex(0x9CA3AF)).max_lines(1).observe(|me, app: &App| {
+                        if let Some(view) = &app.answers {
+                            me.set_text(view.name.clone());
+                        }
+                    }),
+                )),
+            )),
+            // The list's search, or the open answer's toolbar.
+            // The search box in the app's colors: a dark field with the menus' border.
+            SkiaEditor::new()
+                .row(1)
+                .fill_x()
+                .font_size(14)
+                .background_color(hex(ROW))
+                .text_color(Color::WHITE)
+                .placeholder_color(hex(IDLE))
+                .cursor_color(hex(ACCENT))
                 .stroke_color(hex(0x3B4256))
                 .stroke_width(1.55)
-                .padding((12, 10, 12, 12))
-                .observe(|me, app: &App| {
-                    if let Some(view) = &app.answers {
-                        me.set_accessibility_label(format!("Last answers of {}", view.name));
+                .corner_radius(8)
+                .placeholder_text("Search questions and answers")
+                .accessibility_label("Search questions and answers")
+                .observe(move |me, app: &App| me.set_is_visible(listing(app)))
+                .on_text_changed(|_me, app: &mut App, cx, text| {
+                    if let Some(view) = &mut app.answers {
+                        view.filter = text.to_string();
+                    }
+                    fill_answers(app, cx);
+                }),
+            SkiaRow::new()
+                .row(1)
+                .spacing(4)
+                .accessibility_role(Aria::TOOLBAR)
+                .accessibility_label("Answer")
+                .observe(|me, app: &App| me.set_is_visible(opened(app).is_some()))
+                .children((
+                    tool_button(|app| if opened(app).is_some_and(|e| pinned(app, e)) { ("📌", "Unpin") } else { ("📌", "Pin") }).on_tapped(|_me, app: &mut App, cx| {
+                        if let Some(index) = app.answers.as_ref().and_then(|v| v.open) {
+                            toggle_pin(app, cx, index);
+                        }
+                    }),
+                    tool_button(|app| if app.answers.as_ref().is_some_and(|v| v.copied) { ("✓", "Copied") } else { ("📋", "Copy") }).on_tapped(|_me, app: &mut App, cx| {
+                        if let Some(index) = app.answers.as_ref().and_then(|v| v.open) {
+                            copy_answer(app, cx, index);
+                            if let Some(view) = &mut app.answers {
+                                view.copied = true;
+                            }
+                        }
+                    }),
+                    tool_button(|_| ("↗", "Go to session")).on_tapped(|_me, app: &mut App, cx| {
+                        if let Some(view) = app.answers.take() {
+                            close_popup(app, cx);
+                            let _ = app.tx.send(if view.live { Cmd::Focus(view.name) } else { Cmd::ReopenOne(view.id) });
+                        }
+                    }),
+                )),
+            // The list, or why there is none.
+            SkiaLayer::new().fill().row(2).observe(move |me, app: &App| me.set_is_visible(listing(app))).children((
+                label("", 13).text_color(hex(0x9CA3AF)).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
+                    let Some(view) = &app.answers else { return };
+                    let text = match &view.list {
+                        None => "Reading the conversation…".to_string(),
+                        Some(Err(why)) => format!("The conversation could not be read: {why}"),
+                        Some(Ok(list)) if list.is_empty() => "No answers yet.".to_string(),
+                        Some(Ok(list)) if answers::matching(list, &view.filter).is_empty() => "Nothing matches.".to_string(),
+                        Some(Ok(_)) => String::new(),
+                    };
+                    me.set_is_visible(!text.is_empty());
+                    me.set_text(text);
+                }),
+                SkiaScroll::new()
+                    .fill()
+                    .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
+                    .scroll_bar_thumb_color(hex(0x4B5563))
+                    .scroll_bar_track_color(Color::new(0x14FFFFFF))
+                    .content(
+                        // Recycled cells, measured as they come into view: rows differ in height.
+                        SkiaStack::new()
+                            .recycling_template(RecyclingTemplate::Enabled)
+                            .measure_items_strategy(MeasuringStrategy::MeasureVisible)
+                            .spacing(6)
+                            .padding((0, 0, 10, 0))
+                            .accessibility_role(Aria::LIST)
+                            .accessibility_label("Questions and answers")
+                            .assign(&mut app.answers_list)
+                            .items(|app: &App| app.answers.as_ref().map_or(0, |v| v.shown.len()), answer_cell, bind_answer),
+                    ),
+            )),
+            // One answer in full: when, the question above it, the text selectable.
+            SkiaScroll::new()
+                .fill()
+                .row(2)
+                .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
+                .scroll_bar_thumb_color(hex(0x4B5563))
+                .scroll_bar_track_color(Color::new(0x14FFFFFF))
+                .observe(|me, app: &App| me.set_is_visible(opened(app).is_some()))
+                .content(SkiaStack::new().spacing(10).padding((0, 0, 10, 0)).children((
+                    label("", 12).text_color(hex(IDLE)).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
+                        let when = opened(app).map(|e| asked(app, e)).unwrap_or_default();
+                        me.set_is_visible(!when.is_empty());
+                        me.set_text(when);
+                    }),
+                    label("", 13).text_color(hex(0x9CA3AF)).accessibility_role(Aria::TEXT).accessibility_text_selectable(true).observe(|me, app: &App| {
+                        if let Some(entry) = opened(app) {
+                            me.set_text(entry.question.clone());
+                        }
+                    }),
+                    label("", 14).accessibility_role(Aria::TEXT).accessibility_text_selectable(true).observe(|me, app: &App| {
+                        if let Some(entry) = opened(app) {
+                            me.set_text(entry.answer.clone());
+                        }
+                    }),
+                ))),
+        )))
+}
+
+/// Back: from an open answer to the list, from the list out of the screen.
+fn back_button() -> Build<SkiaShape> {
+    SkiaShape::new()
+        .corner_radius(8)
+        .padding((8, 5, 12, 5))
+        .vertical_options(LayoutOptions::Center)
+        .stroke_color(hex(0x3B4256))
+        .stroke_width(1.55)
+        .accessibility_role(Aria::BUTTON)
+        .accessibility_label("Back")
+        .animation_tapped(SkiaTouchAnimation::Ripple)
+        .on_hovered(hover_item)
+        .on_tapped(|_me, app: &mut App, cx| go_back(app, cx))
+        .children((label("←  Back", 13).text_color(Color::WHITE),))
+}
+
+fn go_back(app: &mut App, cx: &mut Cx) {
+    close_popup(app, cx);
+    match &mut app.answers {
+        Some(view) if view.open.is_some() => view.open = None,
+        _ => app.answers = None,
+    }
+}
+
+fn close_popup(app: &mut App, cx: &mut Cx) {
+    if let Some(popup) = app.popup.take() {
+        cx.close_popup_window(popup);
+    }
+}
+
+/// A toolbar button: small, an icon and a word (from the app's state: Pin turns into Unpin), lighter
+/// under the mouse; screen readers read the word.
+fn tool_button(look: impl Fn(&App) -> (&'static str, &'static str) + Clone + 'static) -> Build<SkiaShape> {
+    let caption = look.clone();
+    SkiaShape::new()
+        .corner_radius(6)
+        .padding((8, 5, 8, 5))
+        .accessibility_role(Aria::BUTTON)
+        .animation_tapped(SkiaTouchAnimation::Ripple)
+        .on_hovered(hover_item)
+        .observe(move |me, app: &App| me.set_accessibility_label(look(app).1.to_string()))
+        .children((label("", 13).observe(move |me, app: &App| {
+            let (icon, word) = caption(app);
+            me.set_text(format!("{icon} {word}"));
+        }),))
+}
+
+/// Pins an entry of the open screen, or unpins it, and puts the list in its new order.
+fn toggle_pin(app: &mut App, cx: &mut Cx, index: usize) {
+    let Some(view) = &app.answers else { return };
+    let Some(Ok(list)) = &view.list else { return };
+    let Some(entry) = list.get(index).cloned() else { return };
+    let id = view.id.clone();
+    let mut st = app.shared.lock().unwrap();
+    st.toggle_pin(&id, &entry);
+    // The window's copy too, at once: the toolbar and the list change now.
+    app.pins = st.pins.clone();
+    drop(st);
+    fill_answers(app, cx);
+}
+
+fn copy_answer(app: &mut App, cx: &mut Cx, index: usize) {
+    let text = app.answers.as_ref().and_then(|v| match &v.list {
+        Some(Ok(list)) => list.get(index).map(|e| e.answer.clone()),
+        _ => None,
+    });
+    if let Some(text) = text {
+        cx.set_clipboard(text);
+    }
+}
+
+/// An entry's right-click menu: Open, Pin or Unpin, Copy, without opening the answer first.
+fn answer_menu_panel() -> Build<SkiaShape> {
+    let target = |app: &App| app.answers.as_ref().and_then(|v| v.menu);
+    let is_pinned = move |app: &App| {
+        let Some(view) = &app.answers else { return false };
+        let Some(Ok(list)) = &view.list else { return false };
+        target(app).and_then(|i| list.get(i)).is_some_and(|e| pinned(app, e))
+    };
+    SkiaShape::new()
+        .corner_radius(8)
+        .background_color(hex(0x262B3B))
+        .stroke_color(hex(0x3B4256))
+        .stroke_width(1.55)
+        .width_request(MENU_WIDTH)
+        .padding((4, 4, 4, 4))
+        .children(SkiaStack::new().children((
+            // Title bar: which question this answer belongs to, one line.
+            label("", 12).text_color(hex(0x9CA3AF)).max_lines(1).padding((12, 4, 12, 4)).observe(move |me, app: &App| {
+                let Some(view) = &app.answers else { return };
+                let Some(Ok(list)) = &view.list else { return };
+                if let Some(entry) = target(app).and_then(|i| list.get(i)) {
+                    me.set_text(entry.question.split_whitespace().collect::<Vec<_>>().join(" "));
+                }
+            }),
+            SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(0x3B4256)),
+            SkiaStack::new().accessibility_role(Aria::MENU).accessibility_label("Answer").children((
+                menu_item("📖", "Open", |app, _cx| {
+                    if let Some(view) = &mut app.answers {
+                        view.open = view.menu.take();
+                        view.copied = false;
+                    }
+                }),
+                menu_item("📌", "Pin", |app, cx| {
+                    if let Some(index) = app.answers.as_mut().and_then(|v| v.menu.take()) {
+                        toggle_pin(app, cx, index);
                     }
                 })
-                .children(SkiaGrid::new().fill().column_definitions("*").row_definitions("Auto, Auto, *, Auto").row_spacing(10).children((
-                    // Title and Close.
-                    SkiaGrid::new().fill_x().column_definitions("*, Auto").row(0).children((
-                        label("", 15).text_color(Color::WHITE).max_lines(1).vertical_options(LayoutOptions::Center).accessibility_role(Aria::HEADING).observe(|me, app: &App| {
-                            if let Some(view) = &app.answers {
-                                me.set_text(format!("Last answers of {}", view.name));
-                            }
-                        }),
-                        button("Close", 0x3B4256).column(1).on_tapped(|_me, app: &mut App, _cx| app.answers = None),
-                    )),
-                    SkiaEditor::new()
-                        .row(1)
-                        .fill_x()
-                        .font_size(14)
-                        .placeholder_text("Search questions and answers")
-                        .accessibility_label("Search questions and answers")
-                        .observe(|me, app: &App| me.set_is_visible(app.answers.as_ref().is_some_and(|v| v.open.is_none())))
-                        .on_text_changed(|_me, app: &mut App, cx, text| {
-                            if let Some(view) = &mut app.answers {
-                                view.filter = text.to_string();
-                            }
-                            fill_answers(app, cx);
-                        }),
-                    // The list, or why there is none.
-                    SkiaLayer::new().fill().row(2).observe(|me, app: &App| me.set_is_visible(app.answers.as_ref().is_some_and(|v| v.open.is_none()))).children((
-                        label("", 13).text_color(hex(0x9CA3AF)).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
-                            let Some(view) = &app.answers else { return };
-                            let text = match &view.list {
-                                None => "Reading the conversation…".to_string(),
-                                Some(Err(why)) => format!("The conversation could not be read: {why}"),
-                                Some(Ok(list)) if list.is_empty() => "No answers yet.".to_string(),
-                                Some(Ok(list)) if answers::matching(list, &view.filter).is_empty() => "Nothing matches.".to_string(),
-                                Some(Ok(_)) => String::new(),
-                            };
-                            me.set_is_visible(!text.is_empty());
-                            me.set_text(text);
-                        }),
-                        SkiaScroll::new()
-                            .fill()
-                            .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
-                            .scroll_bar_thumb_color(hex(0x4B5563))
-                            .scroll_bar_track_color(Color::new(0x14FFFFFF))
-                            .content(
-                                // Recycled cells, measured as they come into view: rows differ in height.
-                                SkiaStack::new()
-                                    .recycling_template(RecyclingTemplate::Enabled)
-                                    .measure_items_strategy(MeasuringStrategy::MeasureVisible)
-                                    .spacing(6)
-                                    .padding((0, 0, 10, 0))
-                                    .accessibility_role(Aria::LIST)
-                                    .accessibility_label("Questions and answers")
-                                    .assign(&mut app.answers_list)
-                                    .items(|app: &App| app.answers.as_ref().map_or(0, |v| v.shown.len()), answer_cell, bind_answer),
-                            ),
-                    )),
-                    // One answer in full: the question above it, the text selectable.
-                    SkiaScroll::new()
-                        .fill()
-                        .row(2)
-                        .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
-                        .scroll_bar_thumb_color(hex(0x4B5563))
-                        .scroll_bar_track_color(Color::new(0x14FFFFFF))
-                        .observe(|me, app: &App| me.set_is_visible(opened(app).is_some()))
-                        .content(SkiaStack::new().spacing(10).padding((0, 0, 10, 0)).children((
-                            label("", 12).text_color(hex(IDLE)).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
-                                let when = opened(app).map(|e| asked(app, e)).unwrap_or_default();
-                                me.set_is_visible(!when.is_empty());
-                                me.set_text(when);
-                            }),
-                            label("", 13).text_color(hex(0x9CA3AF)).accessibility_role(Aria::TEXT).accessibility_text_selectable(true).observe(|me, app: &App| {
-                                if let Some(entry) = opened(app) {
-                                    me.set_text(entry.question.clone());
-                                }
-                            }),
-                            label("", 14).accessibility_role(Aria::TEXT).accessibility_text_selectable(true).observe(|me, app: &App| {
-                                if let Some(entry) = opened(app) {
-                                    me.set_text(entry.answer.clone());
-                                }
-                            }),
-                        ))),
-                    SkiaRow::new().row(3).spacing(8).observe(|me, app: &App| me.set_is_visible(opened(app).is_some())).children((
-                        button("Back", 0x3B4256).on_tapped(|_me, app: &mut App, _cx| {
-                            if let Some(view) = &mut app.answers {
-                                view.open = None;
-                            }
-                        }),
-                        button("Copy", ACCENT)
-                            .observe(|me, app: &App| me.set_text(if app.answers.as_ref().is_some_and(|v| v.copied) { "Copied" } else { "Copy" }))
-                            .on_tapped(|_me, app: &mut App, cx| {
-                                if let Some(text) = opened(app).map(|e| e.answer.clone()) {
-                                    cx.set_clipboard(text);
-                                    if let Some(view) = &mut app.answers {
-                                        view.copied = true;
-                                    }
-                                }
-                            }),
-                        button("Pin", 0x3B4256)
-                            .observe(|me, app: &App| me.set_text(if opened(app).is_some_and(|e| pinned(app, e)) { "Unpin" } else { "Pin" }))
-                            .on_tapped(|_me, app: &mut App, cx| {
-                                let Some((id, entry)) = app.answers.as_ref().map(|v| v.id.clone()).zip(opened(app).cloned()) else { return };
-                                let mut st = app.shared.lock().unwrap();
-                                st.toggle_pin(&id, &entry);
-                                // The window's copy too, at once: the button and the list change now.
-                                app.pins = st.pins.clone();
-                                drop(st);
-                                fill_answers(app, cx);
-                            }),
-                        button("Go to session", 0x3B4256).on_tapped(|_me, app: &mut App, _cx| {
-                            if let Some(view) = app.answers.take() {
-                                let _ = app.tx.send(if view.live { Cmd::Focus(view.name) } else { Cmd::ReopenOne(view.id) });
-                            }
-                        }),
-                    )),
-                ))),
-        )
+                .observe(move |me, app: &App| me.set_is_visible(!is_pinned(app))),
+                menu_item("📌", "Unpin", |app, cx| {
+                    if let Some(index) = app.answers.as_mut().and_then(|v| v.menu.take()) {
+                        toggle_pin(app, cx, index);
+                    }
+                })
+                .observe(move |me, app: &App| me.set_is_visible(is_pinned(app))),
+                menu_item("📋", "Copy", |app, cx| {
+                    if let Some(index) = app.answers.as_mut().and_then(|v| v.menu.take()) {
+                        copy_answer(app, cx, index);
+                    }
+                }),
+            )),
+        )))
 }
 
 /// The release the banner offers: the newer one, unless the user chose Later for it.
@@ -738,7 +872,7 @@ fn menu_panel() -> Build<SkiaShape> {
                             cx.set_clipboard(m.name);
                         }
                     }),
-                    menu_item("💬", "Last answers", open_answers),
+                    menu_item("💬", "Answers", open_answers),
                     signal_item(Signal::Say),
                     signal_item(Signal::Sound),
                     signal_item(Signal::Toast),
@@ -765,7 +899,7 @@ fn menu_panel() -> Build<SkiaShape> {
                             cx.set_clipboard(m.name);
                         }
                     }),
-                    menu_item("💬", "Last answers", open_answers),
+                    menu_item("💬", "Answers", open_answers),
                     menu_item("🔄", "Reopen", |app, _cx| {
                         if let Some(id) = app.menu.take().and_then(|m| m.closed) {
                             let _ = app.tx.send(Cmd::ReopenOne(id));
@@ -1203,14 +1337,11 @@ pub fn run() {
             ui(app)
                 .font_bytes("Default", include_bytes!("../assets/OpenSans-Regular.ttf"))
                 .background(hex(0x12141C))
-                .on_key_down(|app: &mut App, event, _cx| {
-                    let Some(view) = &mut app.answers else { return false };
-                    if event.key != "Escape" {
+                .on_key_down(|app: &mut App, event, cx| {
+                    if app.answers.is_none() || event.key != "Escape" {
                         return false;
                     }
-                    if view.open.take().is_none() {
-                        app.answers = None;
-                    }
+                    go_back(app, cx);
                     true
                 })
                 .on_canvas_resized(|app, size, cx| {
@@ -1289,7 +1420,7 @@ mod menu_keys {
         host.settle();
     }
 
-    /// The Last answers panel lists the entries, a search narrows them, a click shows one in full.
+    /// The Answers screen lists the entries, a search narrows them, a click shows one in full.
     #[test]
     fn last_answers_panel() {
         let mut host = host(Vec::new());
@@ -1297,7 +1428,7 @@ mod menu_keys {
             answers::Answer { question: "where are the logs?".into(), answer: "In C:\\logs, one file a day.".into(), at_ms: 0 },
             answers::Answer { question: "how do I deploy?".into(), answer: "Run dev/deploy.ps1 from the repo.".into(), at_ms: 0 },
         ];
-        host.ui.state.answers = Some(AnswersView { id: "a".into(), name: "api".into(), live: true, list: Some(Ok(list)), filter: String::new(), shown: Vec::new(), open: None, copied: false });
+        host.ui.state.answers = Some(AnswersView { id: "a".into(), name: "api".into(), live: true, list: Some(Ok(list)), filter: String::new(), shown: Vec::new(), open: None, menu: None, copied: false });
         fill_answers(&mut host.ui.state, &mut host.ui.tree.cx());
         host.ui.state_changed();
         host.settle();
@@ -1315,7 +1446,7 @@ mod menu_keys {
         host.ui.state_changed();
         host.settle();
         assert!(has(&host, Aria::TEXT, "Run dev/deploy.ps1 from the repo."));
-        assert!(has(&host, Aria::BUTTON, "Copy") && has(&host, Aria::BUTTON, "Pin") && has(&host, Aria::BUTTON, "Go to session"));
+        assert!(has(&host, Aria::BUTTON, "Back") && has(&host, Aria::BUTTON, "Copy") && has(&host, Aria::BUTTON, "Pin") && has(&host, Aria::BUTTON, "Go to session"));
 
         // A pinned answer comes first and says so; the button turns into Unpin. (Pins set in the
         // window's state only: the Pin button would write the real pins.json.)
@@ -1337,9 +1468,9 @@ mod menu_keys {
         let mut host = host(Vec::new());
         open(&mut host);
         assert_eq!(focused(&host), "Copy name", "the menu opens on its first item");
-        assert_eq!(key(&mut host, "ArrowDown"), "Last answers");
+        assert_eq!(key(&mut host, "ArrowDown"), "Answers");
         assert_eq!(key(&mut host, "ArrowDown"), "Announce when finished");
-        assert_eq!(key(&mut host, "ArrowUp"), "Last answers");
+        assert_eq!(key(&mut host, "ArrowUp"), "Answers");
 
         open_palette(&mut host.ui.state, &mut host.ui.tree.cx());
         host.ui.state_changed();
