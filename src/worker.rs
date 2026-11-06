@@ -57,6 +57,7 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
     // The session ids the layout was last read for, and when.
     let mut layout_ids: Vec<String> = Vec::new();
     let mut layout_at = Instant::now();
+    let mut turns = crate::turn::Turns::default();
     loop {
         match rx.recv_timeout(next_poll.saturating_duration_since(Instant::now())) {
             Ok(cmd) => {
@@ -69,6 +70,9 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
         next_poll = Instant::now() + POLL;
         let now = state::now_ms();
         let mut new = poll(&dir, &mut files);
+        // A turn that is over is not work, though a background shell runs; one that ended with a
+        // question waits for the user.
+        turns.apply(&mut new);
         for s in new.values_mut() {
             // No statusUpdatedAt in the file: the status started when it was first seen.
             if s.since_ms == 0 {

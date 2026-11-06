@@ -59,7 +59,7 @@ fn parse(lines: impl BufRead) -> Vec<Answer> {
 }
 
 /// "2026-11-06T06:41:04.738Z" (UTC, as Claude Code writes it) to epoch ms.
-fn epoch_ms(text: &str) -> Option<u64> {
+pub(crate) fn epoch_ms(text: &str) -> Option<u64> {
     let n = |range: std::ops::Range<usize>| text.get(range)?.parse::<i64>().ok();
     let (y, m, d, hh, mm, ss) = (n(0..4)?, n(5..7)?, n(8..10)?, n(11..13)?, n(14..16)?, n(17..19)?);
     // The fraction as milliseconds: ".5" is 500.

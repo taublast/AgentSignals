@@ -6,6 +6,7 @@ mod http;
 mod restore;
 mod platform;
 mod state;
+mod turn;
 mod update;
 mod worker;
 
