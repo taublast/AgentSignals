@@ -372,7 +372,15 @@ fn answer_cell() -> (Build<SkiaShape>, AnswerCell) {
             let pinned = cell_entry(app, me.base().context_index).is_some_and(|e| pinned(app, e));
             me.set_background_color(cell_color(pinned, on));
         })
+        // Every button taps: remember which one pressed, so a right click only opens the menu.
+        .consume_gestures(|_me, app: &mut App, _cx, gesture| {
+            app.button = gesture.button;
+            false
+        })
         .on_tapped(|me, app: &mut App, _cx| {
+            if app.button != MouseButton::Left {
+                return;
+            }
             let row = me.base().context_index;
             if let Some(view) = &mut app.answers {
                 view.open = row.and_then(|row| view.shown.get(row).copied());
@@ -1435,6 +1443,13 @@ mod menu_keys {
         let has = |host: &Headless<App>, role: &str, label: &str| host.ui.accessibility_nodes().iter().any(|n| n.role == role && n.label == label);
         let (logs, deploy) = ("In C:\\logs, one file a day. Question: where are the logs?", "Run dev/deploy.ps1 from the repo. Question: how do I deploy?");
         assert!(has(&host, Aria::BUTTON, logs) && has(&host, Aria::BUTTON, deploy));
+
+        // A right click on an entry opens its menu, never the answer.
+        let at = host.ui.accessibility_nodes().iter().find(|n| n.label == logs).map(|n| n.rect.center()).unwrap();
+        assert!(host.right_click(at.x, at.y));
+        let view = host.ui.state.answers.as_ref().unwrap();
+        assert_eq!((view.open, view.menu), (None, Some(0)), "menu for the entry, nothing opened");
+        assert!(host.ui.state.popup.is_some());
 
         host.ui.state.answers.as_mut().unwrap().filter = "deploy".into();
         fill_answers(&mut host.ui.state, &mut host.ui.tree.cx());
