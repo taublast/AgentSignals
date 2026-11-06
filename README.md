@@ -75,6 +75,9 @@ with the one that finished last on top, then closed with the one closed last on 
   Claude Code panel: a click brings that VS Code window to the front.
 - **Right-click** a row (or the Menu key):
   - **📋 Copy name**: the session's name, to paste into a message to it or to another agent.
+  - **💬 Last answers**: every question you asked in the session with the start of Claude's answer,
+    newest first, and a search over both. Click one to read the whole answer, select or copy it, or go
+    to the session. For the important answer that got buried under pages of later talk.
   - **🔊 Announce when finished**: the app says "<name> finished" every time it finishes.
   - **🔔 Play a sound when finished**: a short sound (tada on Windows, Glass on macOS).
   - **💬 Notify when finished**: a notification "<name> finished". Click it and the session's
@@ -90,7 +93,7 @@ with the one that finished last on top, then closed with the one closed last on 
 
   Each signal item turns into "Stop ..." once it is on; choose it again to turn it off.
 
-  On a closed session the menu has **📋 Copy name**, **🔄 Reopen**, **🎨 Tint** and **🗑 Remove** (takes it off the list;
+  On a closed session the menu has **📋 Copy name**, **💬 Last answers**, **🔄 Reopen**, **🎨 Tint** and **🗑 Remove** (takes it off the list;
   the conversation itself stays, `claude --resume` still finds it).
 
 **Closed sessions** stay in the list when you close their terminal, until you remove them. Only

@@ -131,6 +131,8 @@ pub struct State {
     pub skipped_update: String,
     /// "Update and restart" under way, or why it failed.
     pub install: crate::update::Install,
+    /// The questions and answers of the session the Last answers panel shows (its id), once read.
+    pub answers: Option<(String, Result<Vec<crate::answers::Answer>, String>)>,
 }
 
 /// settings.json: what the user set in the window that is not a rule.

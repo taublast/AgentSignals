@@ -169,7 +169,7 @@ impl Memory {
 }
 
 /// The transcript of a session, in whichever project folder Claude Code put it.
-fn transcript(id: &str) -> Option<PathBuf> {
+pub(crate) fn transcript(id: &str) -> Option<PathBuf> {
     let projects = platform::home_dir().join(".claude").join("projects");
     std::fs::read_dir(projects).ok()?.flatten().map(|d| d.path().join(format!("{id}.jsonl"))).find(|p| p.is_file())
 }
