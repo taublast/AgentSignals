@@ -121,9 +121,13 @@ fn final_text(tail: &str, line: &str) -> Option<String> {
     })
 }
 
-/// What a final answer asks the user, if it asks something: the last line with a question mark
-/// that ends a sentence, outside code; else an "Open questions" heading's first item.
-// ponytail: a guess from the text; a rhetorical question turns the row yellow once.
+/// What a final answer asks the user, if it asks something. A question to the user ends the
+/// answer: the last line with a question mark ending a sentence in the last paragraph, outside
+/// code. Lists after it (the question's options, "Sources:" with links) are passed over to the
+/// paragraph before them. Else the first item under an "Open questions" heading. Headings and table rows are titles, not
+/// questions.
+// ponytail: a guess from the text; a question further up is missed, a rhetorical one at the end
+// turns the row yellow until it is clicked.
 pub fn question(text: &str) -> Option<String> {
     let mut code = false;
     let mut lines: Vec<&str> = Vec::new();
@@ -142,11 +146,34 @@ pub fn question(text: &str) -> Option<String> {
         if line.chars().count() > 160 { format!("{}…", line.chars().take(159).collect::<String>()) } else { line.to_string() }
     };
     let asks = |line: &str| {
-        let bytes: Vec<char> = line.chars().collect();
-        bytes.iter().enumerate().any(|(i, c)| *c == '?' && bytes.get(i + 1).is_none_or(|n| n.is_whitespace() || matches!(n, '"' | '\'' | ')' | '*' | '`' | '»' | '”')))
+        let t = line.trim();
+        let chars: Vec<char> = t.chars().collect();
+        !t.starts_with('#') && !t.starts_with('|') && chars.iter().enumerate().any(|(i, c)| *c == '?' && chars.get(i + 1).is_none_or(|n| n.is_whitespace() || matches!(n, '"' | '\'' | ')' | '*' | '`' | '»' | '”')))
     };
-    if let Some(line) = lines.iter().rev().find(|l| asks(l)) {
-        return Some(clean(line));
+    // An option: a list item ("- ", "* ", "1.", "1)", "A)", "a.").
+    let item = |line: &str| {
+        let t = line.trim_start();
+        let mut c = t.chars();
+        t.starts_with("- ") || t.starts_with("* ") || match (c.next(), c.next()) {
+            (Some(first), Some(second)) => first.is_ascii_alphanumeric() && matches!(second, '.' | ')') || t.split_once(['.', ')']).is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|d| d.is_ascii_digit())),
+            _ => false,
+        }
+    };
+    // Paragraphs, the last first: runs of lines between blank ones.
+    let mut paragraphs: Vec<&[&str]> = lines.split(|l| l.trim().is_empty()).filter(|p| !p.is_empty()).collect();
+    paragraphs.reverse();
+    for paragraph in paragraphs.iter().take(3) {
+        if let Some(line) = paragraph.iter().rev().find(|l| asks(l)) {
+            return Some(clean(line));
+        }
+        // A list, maybe under a label ("Sources:", "Options:"), is passed over; anything else ends the search.
+        let body = match paragraph.first() {
+            Some(first) if first.trim_end().ends_with(':') && !item(first) => &paragraph[1..],
+            _ => &paragraph[..],
+        };
+        if body.is_empty() || !body.iter().all(|l| item(l)) {
+            break;
+        }
     }
     let heading = lines.iter().position(|l| l.to_lowercase().contains("open question"))?;
     lines[heading + 1..].iter().find(|l| !l.trim().is_empty()).map(|l| clean(l)).or_else(|| Some(clean(lines[heading])))
@@ -178,6 +205,16 @@ mod tests {
         // Question marks in URLs and code are not questions.
         assert_eq!(question("See https://x.dev/a?v=2 and\n```\nif a? {}\n```\nAll done."), None);
         assert_eq!(question("Built it. Tests pass."), None);
+        // Question-style headings and table cells are titles; only the last paragraph asks.
+        let report = "**Step 1: is the turn over?**\n\n| Status | Asked? |\n|---|---|\n| busy | yes |\n\nCould it ask? Sometimes.\n\n**Weak spots:**\n- long replies are cut.";
+        assert_eq!(question(report), None);
+        assert_eq!(question("Done, tests pass.\n\nShould I push it, or wait for the Mac?"), Some("Should I push it, or wait for the Mac?".into()));
+        assert_eq!(question("Open items:\n1. the icon\n2. should I bump the version?"), Some("2. should I bump the version?".into()));
+        // The last paragraph is the options; the question is just above them.
+        assert_eq!(question("Built.\n\nWhich one should I ship?\n\n1. Windows now\n2. Wait for the Mac"), Some("Which one should I ship?".into()));
+        assert_eq!(question("Two ways:\n\n- A) one\n- B) two"), None);
+        // A question followed by the sources list a web search adds.
+        assert_eq!(question("Can you type that in its session?\n\nSources:\n- [One](https://a.dev/x?y=1)\n- [Two](https://b.dev)"), Some("Can you type that in its session?".into()));
     }
 
     /// The live statuses get the transcript's word: a busy session whose turn is over is idle,
