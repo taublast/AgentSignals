@@ -104,6 +104,10 @@ before its first message has nothing to reopen).
 **Just finished**: a session that finishes gets a red dot, so you see what is new. It turns gray when
 you click the row (or its notification), or the session starts working again.
 
+**Asked you something**: a session whose last answer ends with a question waits for you, yellow, with
+that question on its row, also when Claude Code itself calls it idle. A session whose turn is over is
+finished, also while a server or another background command it started keeps running.
+
 **Recent**: the last status changes ("frontend finished after 17m") and which signals they gave.
 
 The list scrolls when it is longer than the window; the bar on the right shows where you are.
