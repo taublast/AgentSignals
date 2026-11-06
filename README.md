@@ -77,7 +77,8 @@ with the one that finished last on top, then closed with the one closed last on 
   - **📋 Copy name**: the session's name, to paste into a message to it or to another agent.
   - **💬 Last answers**: every question you asked in the session with the start of Claude's answer,
     newest first, and a search over both. Click one to read the whole answer, select or copy it, or go
-    to the session. For the important answer that got buried under pages of later talk.
+    to the session. For the important answer that got buried under pages of later talk: **Pin** it and
+    it stays first in the list, kept with its text even when the conversation is gone.
   - **🔊 Announce when finished**: the app says "<name> finished" every time it finishes.
   - **🔔 Play a sound when finished**: a short sound (tada on Windows, Glass on macOS).
   - **💬 Notify when finished**: a notification "<name> finished". Click it and the session's
@@ -326,7 +327,7 @@ Localhost only, no authentication: any local process can make it beep.
 - Reads `~/.claude/sessions/*.json` (Claude Code's list of live sessions) and, from
   each session's transcript, its first lines (start folder), its last lines (permission mode) and,
   for a session without a name of its own, its title.
-- Writes `rules.json`, `settings.json` (row tints, the version you chose Later for), `sessions.json` (the terminal sessions; closed ones stay until you remove
+- Writes `rules.json`, `settings.json` (row tints, the version you chose Later for), `pins.json` (pinned answers, with their text), `sessions.json` (the terminal sessions; closed ones stay until you remove
   them) and, after a crash, `crash.log` in its folder (`%APPDATA%\AgentSignals` on Windows,
   `~/Library/Application Support/AgentSignals` on macOS). On Windows it registers the notification
   AUMID under `HKCU\Software\Classes\AppUserModelId\AgentSignals`.

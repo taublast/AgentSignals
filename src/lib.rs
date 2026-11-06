@@ -57,6 +57,8 @@ struct App {
     update: Option<update::Update>,
     skipped_update: String,
     install: update::Install,
+    /// Pinned answers of every session (copy of the shared state).
+    pins: Vec<state::Pin>,
     /// The Last answers panel while it is open, and the column its entries go in.
     answers: Option<AnswersView>,
     answers_list: Handle<SkiaLayout>,
@@ -304,15 +306,40 @@ fn open_answers(app: &mut App, cx: &mut Cx) {
     });
 }
 
-/// The entries the search lets through, newest first; the recycled cells show them again.
+/// The entries the search lets through: the pinned ones first, newest asked first, then the rest
+/// newest first; the recycled cells show them again.
 fn fill_answers(app: &mut App, cx: &mut Cx) {
+    let pins = &app.pins;
     if let Some(view) = &mut app.answers {
         view.shown = match &view.list {
-            Some(Ok(list)) => answers::matching(list, &view.filter).into_iter().map(|(i, _)| i).collect(),
+            Some(Ok(list)) => {
+                let (mut pinned, rest): (Vec<usize>, Vec<usize>) =
+                    answers::matching(list, &view.filter).into_iter().map(|(i, _)| i).partition(|&i| pins.iter().any(|p| p.is(&view.id, &list[i])));
+                pinned.sort_by_key(|&i| std::cmp::Reverse(list[i].at_ms));
+                pinned.extend(rest);
+                pinned
+            }
             _ => Vec::new(),
         };
     }
     cx.items_reset(app.answers_list);
+}
+
+/// Whether an answer of the open panel's session is pinned.
+fn pinned(app: &App, entry: &answers::Answer) -> bool {
+    app.answers.as_ref().is_some_and(|view| app.pins.iter().any(|p| p.is(&view.id, entry)))
+}
+
+/// A list cell's background: pinned ones carry a hint of the accent; lighter under the mouse.
+fn cell_color(pinned: bool, hovered: bool) -> Color {
+    row_color(pinned.then_some(ACCENT), false, hovered)
+}
+
+/// The entry a recycled cell shows now.
+fn cell_entry<'a>(app: &'a App, row: Option<usize>) -> Option<&'a answers::Answer> {
+    let view = app.answers.as_ref()?;
+    let Some(Ok(list)) = &view.list else { return None };
+    list.get(*view.shown.get(row?)?)
 }
 
 /// The parts of a recycled entry cell that its bind fills.
@@ -338,7 +365,10 @@ fn answer_cell() -> (Build<SkiaShape>, AnswerCell) {
         .accessibility_role(Aria::BUTTON)
         .accessibility_hint("Opens the full answer")
         .animation_tapped(SkiaTouchAnimation::Ripple)
-        .on_hovered(|me, _app: &mut App, _cx, on| me.set_background_color(row_color(None, false, on)))
+        .on_hovered(|me, app: &mut App, _cx, on| {
+            let pinned = cell_entry(app, me.base().context_index).is_some_and(|e| pinned(app, e));
+            me.set_background_color(cell_color(pinned, on));
+        })
         .on_tapped(|me, app: &mut App, _cx| {
             let row = me.base().context_index;
             if let Some(view) = &mut app.answers {
@@ -363,13 +393,16 @@ fn bind_answer(cell: &AnswerCell, app: &App, row: usize, cx: &mut Cx) {
     let Some(entry) = view.shown.get(row).and_then(|&i| list.get(i)) else { return };
     let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
     let (question, answer) = (flat(&entry.question), flat(&entry.answer));
+    let is_pinned = pinned(app, entry);
     if let Some(mut me) = cx.get_mut(cell.cell) {
+        me.set_background_color(cell_color(is_pinned, false));
         // The answer first, as on screen; then the question it answers.
         let when = asked(app, entry);
-        me.set_accessibility_label(if when.is_empty() { format!("{answer} Question: {question}") } else { format!("{answer} Asked {when}: {question}") });
+        let pin = if is_pinned { "Pinned. " } else { "" };
+        me.set_accessibility_label(if when.is_empty() { format!("{pin}{answer} Question: {question}") } else { format!("{pin}{answer} Asked {when}: {question}") });
     }
     if let Some(mut me) = cx.get_mut(cell.question) {
-        me.set_text(question);
+        me.set_text(if is_pinned { format!("📌 {question}") } else { question });
     }
     if let Some(mut me) = cx.get_mut(cell.when) {
         me.set_text(asked(app, entry));
@@ -508,6 +541,17 @@ fn answers_panel(app: &mut App) -> Build<SkiaShape> {
                                         view.copied = true;
                                     }
                                 }
+                            }),
+                        button("Pin", 0x3B4256)
+                            .observe(|me, app: &App| me.set_text(if opened(app).is_some_and(|e| pinned(app, e)) { "Unpin" } else { "Pin" }))
+                            .on_tapped(|_me, app: &mut App, cx| {
+                                let Some((id, entry)) = app.answers.as_ref().map(|v| v.id.clone()).zip(opened(app).cloned()) else { return };
+                                let mut st = app.shared.lock().unwrap();
+                                st.toggle_pin(&id, &entry);
+                                // The window's copy too, at once: the button and the list change now.
+                                app.pins = st.pins.clone();
+                                drop(st);
+                                fill_answers(app, cx);
                             }),
                         button("Go to session", 0x3B4256).on_tapped(|_me, app: &mut App, _cx| {
                             if let Some(view) = app.answers.take() {
@@ -1054,6 +1098,7 @@ fn sync(app: &mut App, cx: &mut Cx) {
         app.unseen = st.unseen.clone();
         app.update = st.update.clone();
         app.install = st.install.clone();
+        app.pins = st.pins.clone();
         let read = st.answers.clone();
         app.skipped_update = st.skipped_update.clone();
         drop(st);
@@ -1063,7 +1108,15 @@ fn sync(app: &mut App, cx: &mut Cx) {
         );
         if let (Some(view), Some((id, list))) = (&mut app.answers, read) {
             if view.list.is_none() && view.id == id {
-                view.list = Some(list);
+                // Pinned answers the conversation no longer holds come from the pins.
+                view.list = Some(list.map(|mut list| {
+                    for pin in app.pins.iter().filter(|p| p.session == id) {
+                        if !list.iter().any(|a| pin.is(&id, a)) {
+                            list.push(answers::Answer { question: pin.question.clone(), answer: pin.answer.clone(), at_ms: pin.at_ms });
+                        }
+                    }
+                    list
+                }));
                 fill_answers(app, cx);
             }
         }
@@ -1133,6 +1186,7 @@ pub fn run() {
             tints: HashMap::new(),
             unseen: Default::default(),
             hovered: None,
+            pins: Vec::new(),
             answers: None,
             answers_list: Handle::default(),
             update: None,
@@ -1197,6 +1251,7 @@ mod menu_keys {
             tints: HashMap::new(),
             unseen: Default::default(),
             hovered: None,
+            pins: Vec::new(),
             answers: None,
             answers_list: Handle::default(),
             update: None,
@@ -1260,7 +1315,21 @@ mod menu_keys {
         host.ui.state_changed();
         host.settle();
         assert!(has(&host, Aria::TEXT, "Run dev/deploy.ps1 from the repo."));
-        assert!(has(&host, Aria::BUTTON, "Copy") && has(&host, Aria::BUTTON, "Go to session"));
+        assert!(has(&host, Aria::BUTTON, "Copy") && has(&host, Aria::BUTTON, "Pin") && has(&host, Aria::BUTTON, "Go to session"));
+
+        // A pinned answer comes first and says so; the button turns into Unpin. (Pins set in the
+        // window's state only: the Pin button would write the real pins.json.)
+        host.ui.state.pins = vec![state::Pin { session: "a".into(), question: "how do I deploy?".into(), answer: "Run dev/deploy.ps1 from the repo.".into(), at_ms: 0 }];
+        host.ui.state.answers.as_mut().unwrap().filter = String::new();
+        fill_answers(&mut host.ui.state, &mut host.ui.tree.cx());
+        host.ui.state_changed();
+        host.settle();
+        assert_eq!(host.ui.state.answers.as_ref().unwrap().shown, [1, 0], "the pinned one first");
+        assert!(has(&host, Aria::BUTTON, "Unpin"));
+        host.ui.state.answers.as_mut().unwrap().open = None;
+        host.ui.state_changed();
+        host.settle();
+        assert!(has(&host, Aria::BUTTON, "Pinned. Run dev/deploy.ps1 from the repo. Question: how do I deploy?"));
     }
 
     #[test]

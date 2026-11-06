@@ -131,8 +131,28 @@ pub struct State {
     pub skipped_update: String,
     /// "Update and restart" under way, or why it failed.
     pub install: crate::update::Install,
+    /// Answers the user pinned in Last answers, kept in pins.json with their text.
+    pub pins: Vec<Pin>,
     /// The questions and answers of the session the Last answers panel shows (its id), once read.
     pub answers: Option<(String, Result<Vec<crate::answers::Answer>, String>)>,
+}
+
+/// An answer the user pinned: it stays first in its session's Last answers, also when the
+/// conversation file is cut or gone, so its text is kept here.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Pin {
+    /// The session's id.
+    pub session: String,
+    pub question: String,
+    pub answer: String,
+    /// When the question was asked; with the question it tells the answer apart.
+    pub at_ms: u64,
+}
+
+impl Pin {
+    pub fn is(&self, session: &str, entry: &crate::answers::Answer) -> bool {
+        self.session == session && self.at_ms == entry.at_ms && self.question == entry.question
+    }
 }
 
 /// settings.json: what the user set in the window that is not a rule.
@@ -161,7 +181,23 @@ impl State {
         let rules: Vec<Rule> = std::fs::read(rules_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let settings: Settings = std::fs::read(settings_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let tints = settings.tints.iter().filter_map(|(name, c)| Some((name.to_lowercase(), parse_color(c)?))).collect();
-        State { rules, tints, skipped_update: settings.skipped_update, ..State::default() }
+        let pins = std::fs::read(pins_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        State { rules, tints, pins, skipped_update: settings.skipped_update, ..State::default() }
+    }
+
+    /// Pins an answer of a session, or unpins it when it was pinned, and saves the pins.
+    pub fn toggle_pin(&mut self, session: &str, entry: &crate::answers::Answer) {
+        let before = self.pins.len();
+        self.pins.retain(|p| !p.is(session, entry));
+        if self.pins.len() == before {
+            self.pins.push(Pin { session: session.to_string(), question: entry.question.clone(), answer: entry.answer.clone(), at_ms: entry.at_ms });
+        }
+        self.version += 1;
+        let path = pins_path();
+        let _ = std::fs::create_dir_all(path.parent().unwrap());
+        if let Err(e) = std::fs::write(&path, serde_json::to_vec_pretty(&self.pins).unwrap()) {
+            eprintln!("saving {}: {e}", path.display());
+        }
     }
 
     /// Later on the update banner: no banner for this version again.
@@ -244,6 +280,10 @@ pub fn data_dir() -> PathBuf {
 
 fn rules_path() -> PathBuf {
     data_dir().join("rules.json")
+}
+
+fn pins_path() -> PathBuf {
+    data_dir().join("pins.json")
 }
 
 fn settings_path() -> PathBuf {
