@@ -481,14 +481,14 @@ pub fn rule_icons(rules: &[Rule], name: &str) -> String {
     icons
 }
 
-/// The board's order: waiting, busy, then idle with the one that went idle last on top; by name
+/// The board's order: waiting, busy, asked you something, then idle with the one that went idle last on top; by name
 /// within. A key, not a comparator: the order is total for any status.
 pub fn sort_sessions(list: &mut [Session]) {
     list.sort_by_cached_key(|s| {
         let rank = match s.status.as_str() {
             "waiting" => 0,
-            "question" => 1,
-            "busy" => 2,
+            "busy" => 1,
+            "question" => 2,
             _ => 3,
         };
         let idle_since = if s.status == "idle" { s.since_ms } else { 0 };
@@ -574,10 +574,10 @@ mod tests {
 
     #[test]
     fn order() {
-        let mut list = vec![s(1, "idle", 10), s(2, "busy", 0), s(3, "idle", 30), s(4, "waiting", 0), s(5, "other", 20), s(6, "idle", 30)];
+        let mut list = vec![s(1, "idle", 10), s(2, "busy", 0), s(3, "idle", 30), s(4, "waiting", 0), s(5, "other", 20), s(6, "idle", 30), s(7, "question", 0)];
         sort_sessions(&mut list);
         let pids: Vec<u32> = list.iter().map(|s| s.pid).collect();
-        assert_eq!(pids, vec![4, 2, 3, 6, 1, 5]);
+        assert_eq!(pids, vec![4, 2, 7, 3, 6, 1, 5]);
     }
 
     #[test]

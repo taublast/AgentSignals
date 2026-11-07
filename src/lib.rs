@@ -304,7 +304,7 @@ fn matches_filter(filter: &str, fields: &[&str]) -> bool {
     filter.split_whitespace().map(str::to_lowercase).all(|w| fields.iter().any(|f| f.contains(&w)))
 }
 
-/// The bottom line: how many sessions wait, asked, work, rest, are closed, each with its dot (none
+/// The bottom line: how many sessions wait, work, asked, rest, are closed, each with its dot (none
 /// for a count of zero), and the Muted chip at the right while signals are muted.
 fn status_bar() -> Build<SkiaLayout> {
     let count = |status: &'static str, word: &'static str| {
@@ -345,11 +345,11 @@ fn status_bar() -> Build<SkiaLayout> {
                 .accessibility_role(Aria::STATUS)
                 .observe(|me, app: &App| {
                     let n = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
-                    let parts = [(n("waiting"), tr("waiting")), (n("question"), tr("asked")), (n("busy"), tr("working")), (n("idle"), tr("idle")), (app.inactive.len(), tr("closed"))];
+                    let parts = [(n("waiting"), tr("waiting")), (n("busy"), tr("working")), (n("question"), tr("asked")), (n("idle"), tr("idle")), (app.inactive.len(), tr("closed"))];
                     let text: Vec<String> = parts.iter().filter(|(n, _)| *n > 0).map(|(n, w)| trf("{count} {word}", &[("count", &n.to_string()), ("word", w)])).collect();
                     me.set_accessibility_label(if text.is_empty() { tr("No sessions").to_string() } else { text.join(", ") });
                 })
-                .children((count("waiting", tr("waiting")), count("question", tr("asked")), count("busy", tr("working")), count("idle", tr("idle")), count("closed", tr("closed")))),
+                .children((count("waiting", tr("waiting")), count("busy", tr("working")), count("question", tr("asked")), count("idle", tr("idle")), count("closed", tr("closed")))),
             // While signals are muted the bar says so; a click turns them back on.
             SkiaShape::new()
                 .column(1)
@@ -743,8 +743,8 @@ fn help_page() -> Build<SkiaShape> {
             SkiaStack::new().spacing(6).children((
             heading(tr("The rows")),
             dot_line(pal().waiting, tr("Claude Code waits for you: a permission dialog or an input prompt.")),
-            dot_line(pal().question, tr("The last answer asked you something; the question is on the row.")),
             dot_line(pal().busy, tr("The session is working.")),
+            dot_line(pal().question, tr("The last answer asked you something; the question is on the row.")),
             dot_line(pal().finished, tr("It just finished and you have not looked yet.")),
             dot_line(pal().idle, tr("Idle, or closed.")),
             )),

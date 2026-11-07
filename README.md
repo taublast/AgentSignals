@@ -8,7 +8,7 @@ which one is done, which one is waiting for your answer, and which one is still 
 puts all of them in one small window and tells you when something happens, so you stop cycling
 through tabs to find out.
 
-- **See every session at a glance**: yellow is waiting for you, blue asked you something, green is working, red has just
+- **See every session at a glance**: yellow is waiting for you, green is working, blue asked you something, red has just
   finished, gray is free.
 - **Know when one finishes**: right-click a session and turn on what you want: a spoken
   "api-server finished", a sound, a notification, a flashing taskbar or Dock icon.
@@ -35,7 +35,7 @@ Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://git
 **Top bar**: a field that filters the sessions by name, title, remote id or note, and the
 **Settings** and **Help** buttons.
 
-**Status bar**: how many sessions are waiting for you, asked you something, are working, idle and
+**Status bar**: how many sessions are waiting for you, are working, asked you something, idle and
 closed. While signals are muted it shows **Muted**; a click turns them back on.
 
 **Settings**
@@ -81,7 +81,7 @@ To have Agent Signals reopen them there too, set `"reopen_home_in"` to that fold
 
 **One row per Claude Code session**; the rows of sessions that need a look (waiting, asking, working,
 finished unseen) are a little brighter than idle and closed ones. In this order: waiting for you first, then
-the ones that asked you something, then working, then idle
+working, then the ones that asked you something, then idle
 with the one that finished last on top, then closed with the one closed last on top.
 
 - **Click** a row: its terminal tab comes to the front. Click a closed (gray) row and it opens
@@ -133,8 +133,8 @@ Rows, menu items and the switches light up under the mouse.
 | On a row | Meaning |
 |---|---|
 | 🟡 yellow dot | Claude Code waits for you: a permission dialog, an input prompt. |
-| 🔵 blue dot | The last answer asked you something; the question is on the row. |
 | 🟢 green dot | The session is working. |
+| 🔵 blue dot | The last answer asked you something; the question is on the row. |
 | 🔴 red dot | It just finished and you have not clicked it yet: new for you. |
 | ⚪ gray dot | The session is idle: it finished and has nothing to do. |
 | ⚪ gray dot, gray name, "closed 2h" | The session is closed: its terminal is gone. Click to reopen it. |
