@@ -67,8 +67,10 @@ struct App {
     /// The window's shell, and its route now: "" the list, "answers", "settings", "help".
     shell: Handle<SkiaShell>,
     route: String,
-    /// The list's filter: rows whose name, title, remote id or second line hold it.
+    /// The list's filter: rows whose name, title, remote id or second line hold it; its field.
     filter: String,
+    filter_editor: Handle<SkiaEditor>,
+    answers_editor: Handle<SkiaEditor>,
     /// The window on top of others (the header switch; kept across a rebuild).
     topmost: bool,
     /// Copies of the settings, for the Settings screen; `start_at_login` is read from the system.
@@ -183,7 +185,7 @@ fn content(app: &mut App) -> Build<SkiaLayout> {
 fn main_page(app: &mut App) -> Build<SkiaLayout> {
     SkiaGrid::new().fill().column_definitions("*").row_definitions("Auto, *, Auto").row_spacing(0).children((
         SkiaGrid::new().row(0).fill_x().column_definitions("*, Auto").column_spacing(8).padding((12, 12, 10, 8)).children((
-            filter_field(),
+            filter_field(app),
             SkiaRow::new().column(1).spacing(2).vertical_options(LayoutOptions::Center).accessibility_role(Aria::TOOLBAR).children((
                 icon_button(icons::SETTINGS, "Settings", "Opens the settings", open_settings),
                 icon_button(icons::CIRCLE_QUESTION_MARK, "Help", "Opens the help", open_help),
@@ -217,7 +219,34 @@ fn main_page(app: &mut App) -> Build<SkiaLayout> {
 }
 
 /// The list's filter: a search icon, then the text, in the dark field of the app's search boxes.
-fn filter_field() -> Build<SkiaShape> {
+fn filter_field(app: &mut App) -> Build<SkiaShape> {
+    search_field("Filter sessions", &mut app.filter_editor, |app| app.filter.clone(), |app, _cx, text| app.filter = text.to_string())
+}
+
+/// The app's search box: a search icon, the text, and a small X that clears it while it holds text,
+/// in a dark field with the menus' border. `value` is what it shows, `changed` gets each edit (and
+/// the empty text from the X).
+fn search_field(placeholder: &'static str, editor: &mut Handle<SkiaEditor>, value: fn(&App) -> String, changed: fn(&mut App, &mut Cx, &str)) -> Build<SkiaShape> {
+    let mut field_slot = Handle::<SkiaEditor>::default();
+    let built = SkiaEditor::new()
+        .column(1)
+        .fill_x()
+        .font_size(13)
+        .background_color(Color::TRANSPARENT)
+        .stroke_width(0.0)
+        .text_color(hex(pal().text))
+        .placeholder_color(hex(pal().muted))
+        .cursor_color(hex(pal().accent))
+        .placeholder_text(placeholder)
+        .accessibility_label(placeholder)
+        .observe(move |me, app: &App| {
+            if !me.is_focused() {
+                me.set_text(value(app));
+            }
+        })
+        .on_text_changed(move |_me, app: &mut App, cx, text| changed(app, cx, text))
+        .assign(&mut field_slot);
+    *editor = field_slot;
     SkiaShape::new()
         .fill_x()
         .corner_radius(8)
@@ -225,25 +254,28 @@ fn filter_field() -> Build<SkiaShape> {
         .stroke_color(hex(pal().border))
         .stroke_width(1.55)
         .padding((10, 0, 6, 0))
-        .children((SkiaGrid::new().fill_x().column_definitions("Auto, *").column_spacing(6).children((
+        .children((SkiaGrid::new().fill_x().column_definitions("Auto, *, Auto").column_spacing(6).children((
             SkiaSvg::from_string(icons::SEARCH).width_request(14).height_request(14).tint_color(hex(pal().muted)).vertical_options(LayoutOptions::Center).input_transparent(true),
-            SkiaEditor::new()
-                .column(1)
-                .fill_x()
-                .font_size(13)
-                .background_color(Color::TRANSPARENT)
-                .stroke_width(0.0)
-                .text_color(hex(pal().text))
-                .placeholder_color(hex(pal().muted))
-                .cursor_color(hex(pal().accent))
-                .placeholder_text("Filter sessions")
-                .accessibility_label("Filter sessions")
-                .observe(|me, app: &App| {
-                    if !me.is_focused() {
-                        me.set_text(app.filter.clone());
+            built,
+            // Clears the text; there only while it holds some.
+            SkiaShape::new()
+                .column(2)
+                .corner_radius(4)
+                .width_request(20)
+                .height_request(20)
+                .vertical_options(LayoutOptions::Center)
+                .accessibility_role(Aria::BUTTON)
+                .accessibility_label("Clear")
+                .tooltip("Clear")
+                .observe(move |me, app: &App| me.set_is_visible(!value(app).is_empty()))
+                .on_hovered(|me, _app: &mut App, _cx, on| me.set_background_color(if on { hex(mix(pal().row, pal().hover_toward, pal().hover_control)) } else { Color::TRANSPARENT }))
+                .on_tapped(move |_me, app: &mut App, cx| {
+                    changed(app, cx, "");
+                    if let Some(mut editor) = cx.get_mut(field_slot) {
+                        editor.set_text(String::new());
                     }
                 })
-                .on_text_changed(|_me, app: &mut App, _cx, text| app.filter = text.to_string()),
+                .children((SkiaSvg::from_string(icons::X).width_request(12).height_request(12).tint_color(hex(pal().text_soft)).horizontal_options(LayoutOptions::Center).vertical_options(LayoutOptions::Center),)),
         )),))
 }
 
@@ -948,27 +980,19 @@ fn answers_page(app: &mut App) -> Build<SkiaShape> {
                 )),
             )),
             // The list's search, or the open answer's toolbar.
-            // The search box in the app's colors: a dark field with the menus' border.
-            SkiaEditor::new()
-                .row(1)
-                .fill_x()
-                .font_size(14)
-                .background_color(hex(pal().row))
-                .text_color(hex(pal().text))
-                .placeholder_color(hex(pal().muted))
-                .cursor_color(hex(pal().accent))
-                .stroke_color(hex(pal().border))
-                .stroke_width(1.55)
-                .corner_radius(8)
-                .placeholder_text("Search questions and answers")
-                .accessibility_label("Search questions and answers")
-                .observe(move |me, app: &App| me.set_is_visible(listing(app)))
-                .on_text_changed(|_me, app: &mut App, cx, text| {
+            search_field(
+                "Search questions and answers",
+                &mut app.answers_editor,
+                |app| app.answers.as_ref().map_or(String::new(), |v| v.filter.clone()),
+                |app, cx, text| {
                     if let Some(view) = &mut app.answers {
                         view.filter = text.to_string();
                     }
                     fill_answers(app, cx);
-                }),
+                },
+            )
+            .row(1)
+            .observe(move |me, app: &App| me.set_is_visible(listing(app))),
             SkiaRow::new()
                 .row(1)
                 .spacing(4)
@@ -1599,21 +1623,26 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                     me.set_text(text);
                 }),
             )),
-            label("", 12)
-                .horizontal_options(LayoutOptions::End)
-                .vertical_options(LayoutOptions::Center)
-                .observe(move |me, app: &App| {
+            SkiaRow::new().spacing(4).horizontal_options(LayoutOptions::End).vertical_options(LayoutOptions::Center).children((
+                // A question: a speech bubble with a question mark, in the question's blue.
+                SkiaSvg::from_string(icons::MESSAGE_CIRCLE_QUESTION)
+                    .width_request(13)
+                    .height_request(13)
+                    .vertical_options(LayoutOptions::Center)
+                    .tint_color(hex(pal().question))
+                    .observe(move |me, app: &App| me.set_is_visible(app.session(pid).is_some_and(|s| s.status == "question"))),
+                label("", 12).vertical_options(LayoutOptions::Center).observe(move |me, app: &App| {
                     let Some(s) = app.session(pid) else { return };
                     me.set_text_color(status_color(&s.status));
                     // Idle needs no icon: the gray dot says it.
                     let icon = match s.status.as_str() {
                         "busy" => "⚙ ", // no U+FE0F: without text shaping it only adds an empty advance
                         "waiting" => "✋ ",
-                        "question" => "? ",
                         _ => "",
                     };
                     me.set_text(format!("{icon}{}", state::age(app.now.saturating_sub(s.since_ms))));
                 }),
+            )),
         ))
 }
 
@@ -1819,6 +1848,8 @@ pub fn run() {
             shell: Handle::default(),
             route: String::new(),
             filter: String::new(),
+            filter_editor: Handle::default(),
+            answers_editor: Handle::default(),
             topmost: false,
             theme: String::new(),
             language: String::new(),
@@ -1895,6 +1926,8 @@ mod menu_keys {
             shell: Handle::default(),
             route: String::new(),
             filter: String::new(),
+            filter_editor: Handle::default(),
+            answers_editor: Handle::default(),
             topmost: false,
             theme: String::new(),
             language: String::new(),

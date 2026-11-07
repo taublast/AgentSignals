@@ -127,7 +127,7 @@ Rows, menu items and the switches light up under the mouse.
 | ⚪ gray dot, gray name, "closed 2h" | The session is closed: its terminal is gone. Click to reopen it. |
 | **VSC** chip | The session runs in VS Code's Claude Code panel, not in a terminal. |
 | ✋ 1m | Waiting for you, for 1 minute so far. |
-| ? 5m | Asked you something 5 minutes ago. |
+| speech bubble with "?", 5m | Asked you something 5 minutes ago. |
 | ⚙ 4m | Working, for 4 minutes so far. |
 | 18m (no icon) | Idle, finished 18 minutes ago. |
 | 🔊 after the name | You will hear "<name> finished". |
