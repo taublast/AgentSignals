@@ -327,7 +327,8 @@ pub fn diff(old: &HashMap<u32, Session>, new: &HashMap<u32, Session>, now: u64) 
             None => events.push(event(n, "started", 0)),
             Some(o) if o.status == n.status => {}
             Some(_) if n.status == "waiting" => events.push(event(n, "waiting", 0)),
-            Some(o) if o.status == "busy" && n.status == "idle" => events.push(event(n, "finished", now.saturating_sub(o.since_ms))),
+            // A turn that ended with a question is finished too: the session stopped and waits.
+            Some(o) if o.status == "busy" && (n.status == "idle" || n.status == "question") => events.push(event(n, "finished", now.saturating_sub(o.since_ms))),
             Some(_) => {}
         }
     }
@@ -431,8 +432,9 @@ pub fn sort_sessions(list: &mut [Session]) {
     list.sort_by_cached_key(|s| {
         let rank = match s.status.as_str() {
             "waiting" => 0,
-            "busy" => 1,
-            _ => 2,
+            "question" => 1,
+            "busy" => 2,
+            _ => 3,
         };
         let idle_since = if s.status == "idle" { s.since_ms } else { 0 };
         (rank, std::cmp::Reverse(idle_since), s.name.to_lowercase())

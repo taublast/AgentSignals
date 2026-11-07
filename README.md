@@ -8,7 +8,7 @@ which one is done, which one is waiting for your answer, and which one is still 
 puts all of them in one small window and tells you when something happens, so you stop cycling
 through tabs to find out.
 
-- **See every session at a glance**: yellow is waiting for you, green is working, red has just
+- **See every session at a glance**: yellow is waiting for you, blue asked you something, green is working, red has just
   finished, gray is free.
 - **Know when one finishes**: right-click a session and turn on what you want: a spoken
   "api-server finished", a sound, a notification, a flashing taskbar or Dock icon.
@@ -36,7 +36,7 @@ Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://git
   terminals.
 - **Mute**: silences every signal until you switch it off, for example during a call. Status
   changes are still listed under Recent.
-- **Counts**: how many sessions are waiting for you, working, and idle.
+- **Counts**: how many sessions are waiting for you, asked you something, are working, and idle.
 
 **After a reboot** the list starts with "20 sessions from last time are closed" and their names.
 **Reopen 20 sessions from last time** reopens each one with `claude --resume`: its conversation,
@@ -66,8 +66,9 @@ To have Agent Signals reopen them there too, set `"reopen_home_in"` to that fold
 `%APPDATA%\AgentSignals\sessions.json` on Windows, `"/Users/<you>/Agents"` in
 `~/Library/Application Support/AgentSignals/sessions.json` on macOS).
 
-**One row per Claude Code session**; the rows of sessions that need a look (waiting, working, finished
-unseen) are a little brighter than idle and closed ones. In this order: waiting for you first, then working, then idle
+**One row per Claude Code session**; the rows of sessions that need a look (waiting, asking, working,
+finished unseen) are a little brighter than idle and closed ones. In this order: waiting for you first, then
+the ones that asked you something, then working, then idle
 with the one that finished last on top, then closed with the one closed last on top.
 
 - **Click** a row: its terminal tab comes to the front. Click a closed (gray) row and it opens
@@ -104,8 +105,9 @@ before its first message has nothing to reopen).
 **Just finished**: a session that finishes gets a red dot, so you see what is new. It turns gray when
 you click the row (or its notification), or the session starts working again.
 
-**Asked you something**: a session whose last answer ends with a question waits for you, yellow, with
-that question on its row, also when Claude Code itself calls it idle. A session whose turn is over is
+**Asked you something**: a session whose last answer ends with a question turns blue, with that
+question on its row, also when Claude Code itself calls it idle. Yellow stays for what Claude Code
+itself waits on: a permission dialog or an input prompt. A session whose turn is over is
 finished, also while a server or another background command it started keeps running.
 
 **Recent**: the last status changes ("frontend finished after 17m") and which signals they gave.
@@ -117,13 +119,15 @@ Rows, menu items and the switches light up under the mouse.
 
 | On a row | Meaning |
 |---|---|
-| 🟡 yellow dot | The session waits for you: a question, a permission dialog. |
+| 🟡 yellow dot | Claude Code waits for you: a permission dialog, an input prompt. |
+| 🔵 blue dot | The last answer asked you something; the question is on the row. |
 | 🟢 green dot | The session is working. |
 | 🔴 red dot | It just finished and you have not clicked it yet: new for you. |
 | ⚪ gray dot | The session is idle: it finished and has nothing to do. |
 | ⚪ gray dot, gray name, "closed 2h" | The session is closed: its terminal is gone. Click to reopen it. |
 | **VSC** chip | The session runs in VS Code's Claude Code panel, not in a terminal. |
 | ✋ 1m | Waiting for you, for 1 minute so far. |
+| ? 5m | Asked you something 5 minutes ago. |
 | ⚙ 4m | Working, for 4 minutes so far. |
 | 18m (no icon) | Idle, finished 18 minutes ago. |
 | 🔊 after the name | You will hear "<name> finished". |
@@ -143,7 +147,12 @@ Rows, menu items and the switches light up under the mouse.
 
 - **Sessions** come from Claude Code's own registry, `~/.claude/sessions/<pid>.json` (name, `busy`
   / `idle` / `waiting`). No hooks, nothing to configure in Claude Code.
-- **Events**: `started`, `finished` (busy to idle), `waiting` (needs input, dialog open), `closed`.
+- **Asked you something** (`question`, blue) is the app's own status, detected from the end of each
+  session's conversation file (`~/.claude/projects/...`): Claude ended its turn, and its last
+  paragraph (or the one before a list of options or sources) has a line ending with a question
+  mark, or the answer has an "Open questions:" section. A turn that is over counts as finished even
+  while a background command still runs. The file is read again only when it changed.
+- **Events**: `started`, `finished` (busy to idle, or to asked), `waiting` (needs input, dialog open), `closed`.
 - **Rules** say which event of which session gives which signal. The menu's signal items make them;
   they persist in the app's folder: `%APPDATA%\AgentSignals` on Windows,
   `~/Library/Application Support/AgentSignals` on macOS.

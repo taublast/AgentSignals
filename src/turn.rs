@@ -29,7 +29,8 @@ pub struct Turns {
 
 impl Turns {
     /// Corrects the sessions' statuses from their transcripts: a turn that is over is not work, and
-    /// one that ended with a question waits for the user, as a permission dialog does.
+    /// one that ended with a question is `question` (the app's own status, apart from Claude Code's
+    /// `waiting` for a permission dialog or an input prompt).
     pub fn apply(&mut self, sessions: &mut HashMap<u32, Session>) {
         let ids: Vec<&String> = sessions.values().map(|s| &s.id).collect();
         self.seen.retain(|id, _| ids.contains(&id));
@@ -37,7 +38,7 @@ impl Turns {
             let Some(Turn::Over { question, at_ms }) = self.turn(s) else { continue };
             match question {
                 Some(q) => {
-                    s.status = "waiting".into();
+                    s.status = "question".into();
                     s.waiting_for = q;
                 }
                 None if s.status == "busy" => s.status = "idle".into(),
@@ -227,7 +228,7 @@ mod tests {
     }
 
     /// The live statuses get the transcript's word: a busy session whose turn is over is idle,
-    /// one that asked is waiting with its question.
+    /// one that asked is a question with its text.
     #[test]
     fn statuses_from_turns() {
         let mut turns = Turns::default();
@@ -240,7 +241,7 @@ mod tests {
         turns.seen.get_mut("x").unwrap().2 = 0;
         let mut live = HashMap::from([(1, s("busy"))]);
         turns.apply(&mut live);
-        assert_eq!((live[&1].status.as_str(), live[&1].waiting_for.as_str()), ("waiting", "Ready. Deploy now?"));
+        assert_eq!((live[&1].status.as_str(), live[&1].waiting_for.as_str()), ("question", "Ready. Deploy now?"));
         std::fs::write(&path, r#"{"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Deployed."}]}}"#).unwrap();
         let mut live = HashMap::from([(1, s("busy"))]);
         turns.apply(&mut live);

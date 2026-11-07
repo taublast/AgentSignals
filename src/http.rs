@@ -12,7 +12,7 @@ use std::time::Duration;
 pub const PORT: u16 = 47801;
 
 const HELP: &str = "Agent Signals API, http://127.0.0.1:47801
-GET    /sessions        live Claude Code sessions (name, pid, status busy|idle|waiting, waiting_for, since_ms, cwd, note)
+GET    /sessions        live Claude Code sessions (name, pid, status busy|idle|waiting|question, waiting_for (or the question), since_ms, cwd, note)
 GET    /rules           rules
 POST   /rules           {session: name or \"*\", on: finished|waiting|started|closed, sound?, say?, toast?, title?, flash?, raise?, once?, min_busy_s?}
 DELETE /rules/<id>      remove a rule

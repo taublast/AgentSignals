@@ -146,7 +146,11 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                 label("", 13).text_color(hex(0x9CA3AF)).vertical_options(LayoutOptions::Center).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
                     let count = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
                     let closed = if app.inactive.is_empty() { String::new() } else { format!(" · {} closed", app.inactive.len()) };
-                    me.set_text(format!("{} waiting · {} busy · {} idle{closed}", count("waiting"), count("busy"), count("idle")));
+                    let asked = match count("question") {
+                        0 => String::new(),
+                        n => format!(" · {n} asked"),
+                    };
+                    me.set_text(format!("{} waiting{asked} · {} busy · {} idle{closed}", count("waiting"), count("busy"), count("idle")));
                 }),
             )),
             SkiaScroll::new()
@@ -1021,6 +1025,8 @@ fn section(title: &str) -> Build<SkiaLabel> {
     label(title, 13).text_color(hex(0x9CA3AF)).margin((4, 12, 0, 0)).accessibility_role(Aria::HEADING)
 }
 
+/// A session whose last answer asked you something: sky blue, apart from the waiting yellow.
+const QUESTION: u32 = 0x38BDF8;
 /// Idle and closed sessions: the quiet gray.
 const IDLE: u32 = 0x6B7280;
 /// The dot of a session that just finished, until its row is clicked or it works again.
@@ -1028,9 +1034,11 @@ const FINISHED: u32 = 0xEF4444;
 
 fn status_color(status: &str) -> Color {
     match status {
-        // Yellow asks you something, green works, gray rests (as closed sessions are gray); red is
+        // Yellow: Claude Code waits for you (a permission dialog, an input prompt). Blue: the last
+        // answer asked you something. Green works, gray rests (as closed sessions are gray); red is
         // `FINISHED`, an idle session not looked at yet.
         "waiting" => hex(0xFACC15),
+        "question" => hex(QUESTION),
         "busy" => hex(0x22C55E),
         _ => hex(IDLE),
     }
@@ -1057,6 +1065,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
             let status = match s.status.as_str() {
                 "waiting" if s.waiting_for.is_empty() => "waiting for you".to_string(),
                 "waiting" => format!("waiting for you: {}", s.waiting_for),
+                "question" => format!("asks you: {}", s.waiting_for),
                 "busy" => "working".into(),
                 _ if app.unseen.contains(&s.id) => "finished".into(),
                 _ => "idle".into(),
@@ -1096,7 +1105,9 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                 .vertical_options(LayoutOptions::Center)
                 .observe(move |me, app: &App| {
                     let Some(s) = app.session(pid) else { return };
-                    me.set_background_color(if app.unseen.contains(&s.id) { hex(FINISHED) } else { status_color(&s.status) });
+                    // A question stays blue until it is answered; else red until the row is clicked.
+                    let unseen = app.unseen.contains(&s.id) && s.status != "question";
+                    me.set_background_color(if unseen { hex(FINISHED) } else { status_color(&s.status) });
                 }),
             SkiaStack::new().margin((22, 0, 84, 0)).spacing(2).children((
                 SkiaRow::new().spacing(6).children((
@@ -1139,6 +1150,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                     let icon = match s.status.as_str() {
                         "busy" => "⚙ ", // no U+FE0F: without text shaping it only adds an empty advance
                         "waiting" => "✋ ",
+                        "question" => "? ",
                         _ => "",
                     };
                     me.set_text(format!("{icon}{}", state::age(app.now.saturating_sub(s.since_ms))));
