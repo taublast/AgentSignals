@@ -166,7 +166,7 @@ fn content(app: &mut App) -> Build<SkiaLayout> {
             // Header: wraps to more lines in a narrow window, Settings and Help at its right end. The
             // title is on the window frame.
             SkiaGrid::new().fill_x().column_definitions("*, Auto").row(0).children((
-            SkiaWrap::new().fill_x().padding((16, 12, 8, 8)).spacing(12).children((
+            SkiaWrap::new().fill_x().padding((16, 16, 8, 12)).spacing(12).children((
                 // While signals are muted the header says so; a click turns them back on.
                 SkiaShape::new()
                     .corner_radius(6)
@@ -193,7 +193,7 @@ fn content(app: &mut App) -> Build<SkiaLayout> {
             )),
             // Margins, not padding: the group's own box starts where its icons do, so the keyboard
             // reaches it on the header's line, after what is left of it.
-            SkiaRow::new().column(1).spacing(2).margin((0, 10, 10, 0)).vertical_options(LayoutOptions::Start).accessibility_role(Aria::TOOLBAR).children((
+            SkiaRow::new().column(1).spacing(2).margin((0, 14, 10, 0)).vertical_options(LayoutOptions::Start).accessibility_role(Aria::TOOLBAR).children((
                 icon_button(icons::SETTINGS, "Settings", "Opens the settings", open_settings),
                 icon_button(icons::CIRCLE_QUESTION_MARK, "Help", "Opens the help", open_help),
             )),
