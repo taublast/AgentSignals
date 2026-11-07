@@ -605,7 +605,10 @@ mod notify {
 // -------------------------------------------------------------- this app's window
 
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSApplication, NSRequestUserAttentionType, NSWindow, NSWindowButton, NSWindowCollectionBehavior, NSWindowLevel};
+use objc2_app_kit::{
+    NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSRequestUserAttentionType, NSWindow, NSWindowButton,
+    NSWindowCollectionBehavior, NSWindowLevel,
+};
 
 /// Runs `work` on the main thread, where AppKit has to be used. The worker thread asks for these,
 /// and the main thread is inside the engine's event loop, which drains the main queue.
@@ -665,6 +668,17 @@ pub fn no_maximize() {
         if let Some(zoom) = window.standardWindowButton(NSWindowButton::ZoomButton) {
             zoom.setEnabled(false);
         }
+    });
+}
+
+/// The window's title bar dark or light, as the app's theme (macOS draws it from the system's
+/// appearance otherwise).
+pub fn set_title_bar_dark(dark: bool) {
+    on_main(move |mtm| {
+        let Some(window) = own_window(mtm) else { return };
+        // SAFETY: the two appearance names are AppKit's own constants.
+        let name = unsafe { if dark { NSAppearanceNameDarkAqua } else { NSAppearanceNameAqua } };
+        window.setAppearance(NSAppearance::appearanceNamed(name).as_deref());
     });
 }
 

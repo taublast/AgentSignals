@@ -457,6 +457,19 @@ pub fn no_maximize() {
     }
 }
 
+/// The window's title bar dark or light, as the app's theme (Windows draws it from the system's
+/// theme otherwise).
+pub fn set_title_bar_dark(dark: bool) {
+    use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
+    let Some(hwnd) = own_window() else { return };
+    let value = BOOL::from(dark);
+    unsafe {
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, (&raw const value).cast(), size_of::<BOOL>() as u32);
+        // The title bar repaints with the frame.
+        let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+    }
+}
+
 /// Keeps this app's window above all others, or not.
 pub fn set_topmost(on: bool) {
     let Some(hwnd) = own_window() else { return };

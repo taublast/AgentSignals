@@ -429,6 +429,7 @@ impl Signal {
             Signal::Say => (tr("🔊 Announce when finished"), tr("🔇 Stop announcing"), tr("Announce when finished")),
             Signal::Sound => (tr("🔔 Play a sound when finished"), tr("🔕 Stop the sound"), tr("Play a sound when finished")),
             Signal::Toast => (tr("💬 Notify when finished"), tr("💬 Stop notifying"), tr("Notify when finished")),
+            Signal::Flash if cfg!(target_os = "macos") => (tr("⚡ Bounce in the Dock when finished"), tr("⚡ Stop bouncing"), tr("Bounce in the Dock when finished")),
             Signal::Flash => (tr("⚡ Flash taskbar when finished"), tr("⚡ Stop flashing"), tr("Flash taskbar when finished")),
         }
     }

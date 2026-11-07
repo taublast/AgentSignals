@@ -109,6 +109,12 @@ pub fn pal() -> &'static Palette {
     CURRENT.with(Cell::get)
 }
 
+/// The window is built with the dark colors now.
+pub fn is_dark() -> bool {
+    // The palettes are constants, with no one address to compare: their background tells them apart.
+    pal().bg == DARK.bg
+}
+
 /// Uses `choice` ("system", "dark", "light") for the next build.
 pub fn set(choice: &str) {
     let dark = match choice {
@@ -117,4 +123,15 @@ pub fn set(choice: &str) {
         _ => crate::platform::system_dark(),
     };
     CURRENT.with(|c| c.set(if dark { &DARK } else { &LIGHT }));
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tells_dark_from_light() {
+        super::set("light");
+        assert!(!super::is_dark());
+        super::set("dark");
+        assert!(super::is_dark());
+    }
 }

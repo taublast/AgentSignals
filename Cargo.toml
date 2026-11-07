@@ -16,6 +16,7 @@ sys-locale = "0.3"
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
     "Data_Xml_Dom",
+    "Win32_Graphics_Dwm",
     "UI_Notifications",
     "Win32_Media_Speech",
     "Win32_System_Com",
@@ -30,7 +31,7 @@ windows = { version = "0.62", features = [
 # Sounds, voice, notifications and Terminal tabs go through the system's own programs.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSResponder", "NSButton", "NSControl", "NSView"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSAppearance", "NSWindow", "NSResponder", "NSButton", "NSControl", "NSView"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSString", "NSError", "NSDictionary", "NSValue"] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "alloc", "bitflags", "block2", "UNUserNotificationCenter", "UNNotificationRequest", "UNNotificationContent", "UNNotificationResponse", "UNNotification", "UNNotificationTrigger", "UNError"] }
 block2 = "0.6"

@@ -29,6 +29,7 @@ const TICK_MS: f32 = 1000.0;
 const SWITCH_WIDTH: f32 = 46.0;
 const SWITCH_HEIGHT: f32 = 22.0;
 const MENU_WIDTH: f32 = 260.0;
+const LANGUAGE_MENU_WIDTH: f32 = 220.0;
 /// The window title; the Windows side finds the app's window by it.
 pub(crate) const TITLE: &str = "Agent Signals";
 
@@ -73,6 +74,8 @@ struct App {
     filter: String,
     filter_editor: Handle<SkiaEditor>,
     answers_editor: Handle<SkiaEditor>,
+    /// The Settings page's scroll: the Language list opens under its button wherever it scrolled.
+    settings_scroll: Handle<SkiaScroll>,
     /// The window on top of others (the header switch; kept across a rebuild).
     topmost: bool,
     /// Copies of the settings, for the Settings screen; `start_at_login` is read from the system.
@@ -84,6 +87,8 @@ struct App {
     start_at_login: bool,
     /// Why the last setting could not be applied (the start-at-login entry, a missing folder).
     settings_note: String,
+    /// The reopen folder typed in Settings is not a folder: said under its field.
+    bad_folder: bool,
     /// The row under the mouse: `p<pid>` for a live session, `c<id>` for a closed one.
     hovered: Option<String>,
     /// What the rows were built from: rebuilt only when it changes.
@@ -157,9 +162,11 @@ fn rebuild(app: &mut App, cx: &mut Cx) {
     // The rows come with the next tick's sync, once the shell has put the new list in the window.
     app.session_key = (Vec::new(), Vec::new());
     app.seen = u64::MAX;
+    // The screen that was open comes back once the new shell has put up its root page (at its
+    // first layout): a route pushed before that is dropped.
     let route = std::mem::take(&mut app.route);
     if !route.is_empty() {
-        cx.go_to(app.shell, &route, false);
+        cx.after(app.root, 1.0, move |app: &mut App, cx| cx.go_to(app.shell, &route, false));
     }
 }
 
@@ -179,7 +186,7 @@ fn content(app: &mut App) -> Build<SkiaLayout> {
         })
         .root(main_page(app))
         .route("answers", |app: &mut App, _: &ShellArguments| answers_page(app))
-        .route("settings", |_app: &mut App, _: &ShellArguments| settings_page())
+        .route("settings", |app: &mut App, _: &ShellArguments| settings_page(app))
         .route("help", |_app: &mut App, _: &ShellArguments| help_page()),))
 }
 
@@ -391,6 +398,7 @@ fn icon_button(svg: &'static str, name: &str, hint: &str, tap: fn(&mut App, &mut
 fn open_settings(app: &mut App, cx: &mut Cx) {
     app.start_at_login = platform::starts_at_login();
     app.settings_note.clear();
+    app.bad_folder = false;
     open_screen(app, cx, "settings");
 }
 
@@ -411,7 +419,9 @@ fn open_screen(app: &mut App, cx: &mut Cx, route: &str) {
 }
 
 /// A screen of the shell (Settings, Help): Back and a title, then its content scrolling.
-fn screen(title: &str, body: Build<SkiaLayout>) -> Build<SkiaShape> {
+fn screen(title: &str, body: Build<SkiaLayout>, scroll: Option<&mut Handle<SkiaScroll>>) -> Build<SkiaShape> {
+    let mut unused = Handle::default();
+    let scroll = scroll.unwrap_or(&mut unused);
     SkiaShape::new()
         .fill()
         .background_color(hex(pal().bg))
@@ -429,6 +439,7 @@ fn screen(title: &str, body: Build<SkiaLayout>) -> Build<SkiaShape> {
                 .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
                 .scroll_bar_thumb_color(hex(pal().scroll_thumb))
                 .scroll_bar_track_color(Color::new(pal().scroll_track))
+                .assign(scroll)
                 .content(body.padding((0, 0, 12, 16))),
         )))
 }
@@ -458,8 +469,15 @@ fn language_button() -> Build<SkiaShape> {
         })
         .on_tapped(|me, app: &mut App, cx| {
             close_popup(app, cx);
+            // Under the button, right edges together: the list stays inside the window. The
+            // button's rect is in layout pixels, before the page's scroll (0 at the start,
+            // negative scrolled down).
+            let s = me.base().scale.max(0.1);
+            let r = me.base().rect;
+            let scrolled = cx.find::<SkiaScroll>(app.settings_scroll).map_or(0.0, |sc| sc.viewport_offset_y());
+            let anchor = drawnui::skia::Rect::new(r.right / s - LANGUAGE_MENU_WIDTH, r.top / s + scrolled, r.right / s, r.bottom / s + scrolled);
             let options = PopupWindowOptions { cpu: true, ..Default::default() };
-            app.popup = Some(cx.open_popup_window(language_menu(), me.id(), options));
+            app.popup = Some(cx.open_popup_window(language_menu(), anchor, options));
         })
         .children(SkiaRow::new().spacing(6).vertical_options(LayoutOptions::Center).children((
             label("", 13).vertical_options(LayoutOptions::Center).observe(|me, app: &App| me.set_text(language_name(&app.language))),
@@ -501,7 +519,7 @@ fn language_menu() -> Build<SkiaShape> {
         .background_color(hex(pal().panel))
         .stroke_color(hex(pal().border))
         .stroke_width(1.55)
-        .width_request(220)
+        .width_request(LANGUAGE_MENU_WIDTH)
         .padding((4, 4, 4, 4))
         .children(SkiaStack::new().accessibility_role(Aria::MENU).accessibility_label(tr("Language")).children(items))
 }
@@ -573,12 +591,13 @@ fn save_settings(app: &App) {
 
 /// Settings: Appearance (theme), Sessions (questions, reopen folder), App (start at login, updates),
 /// About.
-fn settings_page() -> Build<SkiaShape> {
+fn settings_page(app: &mut App) -> Build<SkiaShape> {
     let theme = |name: &'static str, text: &'static str| {
         chip(text, move |app: &App| app.theme == name, move |app: &mut App, cx| {
             app.theme = name.to_string();
             save_settings(app);
             theme::set(name);
+            let _ = app.tx.send(Cmd::TitleBar(theme::is_dark()));
             rebuild(app, cx);
         })
     };
@@ -639,14 +658,17 @@ fn settings_page() -> Build<SkiaShape> {
                 })
                 .on_text_changed(|_me, app: &mut App, _cx, text| {
                     let folder = text.trim().to_string();
-                    if folder.is_empty() || std::path::Path::new(&folder).is_dir() {
-                        app.settings_note.clear();
+                    app.bad_folder = !(folder.is_empty() || std::path::Path::new(&folder).is_dir());
+                    if !app.bad_folder {
                         app.reopen_home_in = folder.clone();
                         let _ = app.tx.send(Cmd::ReopenFolder(folder));
-                    } else {
-                        app.settings_note = tr("No such folder.").into();
                     }
                 }),
+            label(tr("No such folder."), 12)
+                .text_color(hex(pal().finished))
+                .accessibility_role(Aria::TEXT)
+                .accessibility_live(Aria::LIVE_POLITE)
+                .observe(|me, app: &App| me.set_is_visible(app.bad_folder)),
             label(tr("Claude Code asks to trust the home folder every time; a folder you trusted once does not. Empty: each session reopens in its own folder."), 12).text_color(hex(pal().text_soft)),
             )),
             SkiaStack::new().spacing(10).children((
@@ -684,6 +706,7 @@ fn settings_page() -> Build<SkiaShape> {
             tool_button(|_| ("↗", "github.com/taublast/AgentSignals")).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals")),
             )),
         )),
+        Some(&mut app.settings_scroll),
     )
 }
 
@@ -736,7 +759,11 @@ fn help_page() -> Build<SkiaShape> {
             )),
             SkiaStack::new().spacing(6).children((
             heading(tr("Keys")),
-            text(tr("Tab and the arrow keys move through the list, Enter clicks, Escape goes back. Ctrl+, opens Settings, F1 this help.")),
+            text(if cfg!(target_os = "macos") {
+                tr("Tab and the arrow keys move through the list, Return clicks, Escape goes back. Cmd+, opens Settings, fn+F1 this help.")
+            } else {
+                tr("Tab and the arrow keys move through the list, Enter clicks, Escape goes back. Ctrl+, opens Settings, F1 this help.")
+            }),
             )),
             SkiaStack::new().spacing(6).children((
             heading(tr("For agents")),
@@ -755,6 +782,7 @@ fn help_page() -> Build<SkiaShape> {
             )),
             )),
         )),
+        None,
     )
 }
 
@@ -987,7 +1015,7 @@ fn answer_cell() -> (Build<SkiaShape>, AnswerCell) {
                 label("", 12).text_color(hex(pal().text_soft)).max_lines(1).assign(&mut handles.question),
                 label("", 12).text_color(hex(pal().muted)).column(1).assign(&mut handles.when),
             )),
-            label("", 13).text_color(hex(pal().answer)).max_lines(2).assign(&mut handles.answer),
+            label("", 13).text_color(hex(pal().answer)).max_lines(3).assign(&mut handles.answer),
         )));
     (cell, handles)
 }
@@ -1955,6 +1983,7 @@ pub fn run() {
             filter: String::new(),
             filter_editor: Handle::default(),
             answers_editor: Handle::default(),
+            settings_scroll: Handle::default(),
             topmost: false,
             theme: String::new(),
             language: String::new(),
@@ -1963,6 +1992,7 @@ pub fn run() {
             reopen_home_in: String::new(),
             start_at_login: false,
             settings_note: String::new(),
+            bad_folder: false,
             pins: Vec::new(),
             answers: None,
             answers_list: Handle::default(),
@@ -1994,6 +2024,7 @@ pub fn run() {
                     app.size = size;
                     if !std::mem::replace(&mut app.ticking, true) {
                         let _ = app.tx.send(Cmd::WindowReady);
+                        let _ = app.tx.send(Cmd::TitleBar(theme::is_dark()));
                         tick(app, cx);
                     }
                 }),
@@ -2033,6 +2064,7 @@ mod menu_keys {
             filter: String::new(),
             filter_editor: Handle::default(),
             answers_editor: Handle::default(),
+            settings_scroll: Handle::default(),
             topmost: false,
             theme: String::new(),
             language: String::new(),
@@ -2041,6 +2073,7 @@ mod menu_keys {
             reopen_home_in: String::new(),
             start_at_login: false,
             settings_note: String::new(),
+            bad_folder: false,
             pins: Vec::new(),
             answers: None,
             answers_list: Handle::default(),
@@ -2059,6 +2092,22 @@ mod menu_keys {
         host.ui.set_accessibility_enabled(true);
         host.settle();
         host
+    }
+
+    /// A theme or language change rebuilds the window and keeps the screen that was open.
+    #[test]
+    fn rebuild_keeps_the_open_screen() {
+        let mut host = host(Vec::new());
+        let shell = host.ui.state.shell;
+        host.ui.tree.cx().go_to(shell, "settings", false);
+        host.settle();
+        assert_eq!(host.ui.state.route, "settings");
+        rebuild(&mut host.ui.state, &mut host.ui.tree.cx());
+        host.settle();
+        host.frame_after(500.0);
+        host.settle();
+        let heading = host.ui.accessibility_nodes().iter().any(|n| n.role == Aria::DIALOG && n.label == "Settings");
+        assert!(heading && host.ui.state.route == "settings");
     }
 
     fn focused(host: &Headless<App>) -> String {

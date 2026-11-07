@@ -8,7 +8,7 @@
 //!   (`Ok(false)`: no terminal tab with that title), `tab_layout() -> Vec<(window, tab, title)>`,
 //!   `flash_terminal(title) -> bool` (false: no terminal window with that tab).
 //!   A tab title is the session's name after a status marker; match it with `state::tab_is`.
-//! - This app's window: `flash_app()`, `raise_app()`, `set_topmost(bool)`, `no_maximize()` (once,
+//! - This app's window: `flash_app()`, `raise_app()`, `set_topmost(bool)`, `set_title_bar_dark(bool)`, `no_maximize()` (once,
 //!   when the window exists: no maximize button, no maximizing by double-click or snapping); `error_box(text)` when
 //!   the app cannot start (no window yet).
 //! - `focus_editor(cwd) -> Result<bool>`: brings to the front the VS Code window that has the
