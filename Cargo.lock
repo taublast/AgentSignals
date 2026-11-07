@@ -752,9 +752,9 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "drawnui"
-version = "0.1.0-preview.33"
+version = "0.1.0-preview.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88b53967338c3a1bf03f53a381aeaf53570f3d72a4660536df39aa2f05aec082"
+checksum = "a3e1e82d2ab1d1c724fc07f92569cef866851ef7b6f0686d186535a4a017d7e2"
 dependencies = [
  "accesskit",
  "accesskit_winit",

@@ -122,6 +122,11 @@ pub fn set(choice: &str) {
         "dark" => true,
         _ => crate::platform::system_dark(),
     };
+    set_dark(dark);
+}
+
+/// Dark or light colors for the next build.
+pub fn set_dark(dark: bool) {
     CURRENT.with(|c| c.set(if dark { &DARK } else { &LIGHT }));
 }
 

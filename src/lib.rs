@@ -1928,7 +1928,18 @@ fn sync(app: &mut App, cx: &mut Cx) {
 /// The window. Every SkiaButton is a button for screen readers and the keyboard (the engine gives
 /// it no role of its own).
 fn ui(app: App) -> Ui<App> {
-    Ui::new(app, build).default_accessibility_role::<SkiaButton>(Aria::BUTTON)
+    Ui::new(app, build).default_accessibility_role::<SkiaButton>(Aria::BUTTON).on_system_theme_changed(follow_system_theme)
+}
+
+/// The system turned light or dark: a window on the System theme follows it at once.
+fn follow_system_theme(app: &mut App, theme: SystemTheme, cx: &mut Cx) {
+    let dark = theme == SystemTheme::Dark;
+    if app.theme != "system" || dark == theme::is_dark() {
+        return;
+    }
+    theme::set_dark(dark);
+    let _ = app.tx.send(Cmd::TitleBar(dark));
+    rebuild(app, cx);
 }
 
 static STARTED: OnceLock<(Shared, Sender<Cmd>)> = OnceLock::new();
@@ -2108,6 +2119,28 @@ mod menu_keys {
         host.settle();
         let heading = host.ui.accessibility_nodes().iter().any(|n| n.role == Aria::DIALOG && n.label == "Settings");
         assert!(heading && host.ui.state.route == "settings");
+    }
+
+    /// On the System theme the window follows the system turning light or dark while it runs, and
+    /// keeps the screen that was open; a chosen theme stays as it is.
+    #[test]
+    fn follows_the_system_theme() {
+        let mut host = host(Vec::new());
+        host.ui.state.theme = "system".into();
+        theme::set_dark(true);
+        let shell = host.ui.state.shell;
+        host.ui.tree.cx().go_to(shell, "settings", false);
+        host.settle();
+        host.system_theme(SystemTheme::Light);
+        host.settle();
+        host.frame_after(500.0);
+        host.settle();
+        assert!(!theme::is_dark());
+        assert_eq!(host.ui.state.route, "settings");
+        host.ui.state.theme = "light".into();
+        host.system_theme(SystemTheme::Dark);
+        host.settle();
+        assert!(!theme::is_dark(), "a chosen theme does not follow the system");
     }
 
     fn focused(host: &Headless<App>) -> String {
