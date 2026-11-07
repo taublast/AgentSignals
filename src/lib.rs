@@ -276,6 +276,8 @@ fn icon_button(svg: &'static str, name: &str, hint: &str, tap: fn(&mut App, &mut
         .accessibility_role(Aria::BUTTON)
         .accessibility_label(name)
         .accessibility_hint(hint)
+        // Only the icons have a tooltip: they show no text of their own.
+        .tooltip(name)
         .on_hovered(|me, _app: &mut App, _cx, on| {
             me.set_background_color(if on { hex(mix(pal().bg, pal().hover_toward, pal().hover_control)) } else { Color::TRANSPARENT });
         })
@@ -499,6 +501,23 @@ fn settings_panel() -> Build<SkiaShape> {
     )
 }
 
+/// A small link button: the accent fill for the main one, an outline for the other; lighter under
+/// the mouse.
+fn pill(text: &str, main: bool) -> Build<SkiaShape> {
+    let fill = if main { pal().accent } else { pal().bg };
+    SkiaShape::new()
+        .corner_radius(6)
+        .padding((12, 4, 12, 4))
+        .background_color(hex(fill))
+        .stroke_color(hex(if main { pal().accent } else { pal().border }))
+        .stroke_width(1.55)
+        .accessibility_role(Aria::BUTTON)
+        .accessibility_label(text)
+        .animation_tapped(SkiaTouchAnimation::Ripple)
+        .on_hovered(move |me, _app: &mut App, _cx, on| me.set_background_color(hex(if on { mix(fill, pal().hover_toward, pal().hover_control) } else { fill })))
+        .children((label(text, 13).text_color(if main { Color::WHITE } else { hex(pal().text) }),))
+}
+
 /// A line of Help's color list: the status dot as on a row, then what it means.
 fn dot_line(color: u32, text: &str) -> Build<SkiaLayout> {
     SkiaGrid::new().fill_x().column_definitions("Auto, *").column_spacing(10).children((
@@ -547,8 +566,8 @@ fn help_panel() -> Build<SkiaShape> {
                 tool_button(|_| ("↗", "DrawnUI for Rust")).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/DrawnUi/DrawnUi.Rust")),
             )),
             SkiaRow::new().spacing(8).margin((0, 4, 0, 0)).children((
-                button("GitHub", pal().border).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals")),
-                button("Report an issue", pal().accent).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals/issues/new")),
+                pill("GitHub", false).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals")),
+                pill("Report an issue", true).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals/issues/new")),
             )),
             )),
         )),
@@ -1754,7 +1773,7 @@ pub fn run() {
                     }
                     true
                 })
-                .tooltips_from_accessibility(true)
+
                 .on_canvas_resized(|app, size, cx| {
                     app.size = size;
                     if !std::mem::replace(&mut app.ticking, true) {
