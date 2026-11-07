@@ -671,14 +671,15 @@ pub fn no_maximize() {
     });
 }
 
-/// The window's title bar dark or light, as the app's theme (macOS draws it from the system's
-/// appearance otherwise).
-pub fn set_title_bar_dark(dark: bool) {
+/// The window's title bar dark or light as the app's theme; `None`: the window follows the
+/// system's appearance again. Only a chosen theme sets one: a window with an appearance of its own
+/// no longer changes with the system, and the engine learns of system changes from the window.
+pub fn set_title_bar(dark: Option<bool>) {
     on_main(move |mtm| {
         let Some(window) = own_window(mtm) else { return };
         // SAFETY: the two appearance names are AppKit's own constants.
-        let name = unsafe { if dark { NSAppearanceNameDarkAqua } else { NSAppearanceNameAqua } };
-        window.setAppearance(NSAppearance::appearanceNamed(name).as_deref());
+        let appearance = dark.and_then(|dark| NSAppearance::appearanceNamed(unsafe { if dark { NSAppearanceNameDarkAqua } else { NSAppearanceNameAqua } }));
+        window.setAppearance(appearance.as_deref());
     });
 }
 

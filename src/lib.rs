@@ -597,7 +597,7 @@ fn settings_page(app: &mut App) -> Build<SkiaShape> {
             app.theme = name.to_string();
             save_settings(app);
             theme::set(name);
-            let _ = app.tx.send(Cmd::TitleBar(theme::is_dark()));
+            let _ = app.tx.send(title_bar(name));
             rebuild(app, cx);
         })
     };
@@ -1931,6 +1931,16 @@ fn ui(app: App) -> Ui<App> {
     Ui::new(app, build).default_accessibility_role::<SkiaButton>(Aria::BUTTON).on_system_theme_changed(follow_system_theme)
 }
 
+/// The title bar for a theme choice: a chosen theme's, or the system's for System. A title bar set
+/// to one stops following the system (on macOS the window then stops reporting system changes).
+fn title_bar(choice: &str) -> Cmd {
+    Cmd::TitleBar(match choice {
+        "dark" => Some(true),
+        "light" => Some(false),
+        _ => None,
+    })
+}
+
 /// The system turned light or dark: a window on the System theme follows it at once.
 fn follow_system_theme(app: &mut App, theme: SystemTheme, cx: &mut Cx) {
     let dark = theme == SystemTheme::Dark;
@@ -1938,7 +1948,7 @@ fn follow_system_theme(app: &mut App, theme: SystemTheme, cx: &mut Cx) {
         return;
     }
     theme::set_dark(dark);
-    let _ = app.tx.send(Cmd::TitleBar(dark));
+    let _ = app.tx.send(title_bar("system"));
     rebuild(app, cx);
 }
 
@@ -2035,7 +2045,8 @@ pub fn run() {
                     app.size = size;
                     if !std::mem::replace(&mut app.ticking, true) {
                         let _ = app.tx.send(Cmd::WindowReady);
-                        let _ = app.tx.send(Cmd::TitleBar(theme::is_dark()));
+                        let choice = app.shared.lock().unwrap().theme.clone();
+                        let _ = app.tx.send(title_bar(&choice));
                         tick(app, cx);
                     }
                 }),
