@@ -102,7 +102,8 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
                 let mut fired = Vec::new();
                 for rule in &rules {
                     fired.push(if st.muted { "muted".into() } else { execute(&signals, &tx, &rule.action, &event.session, &waiting, &tab) });
-                    if rule.once {
+                    // A once rule goes after it fired; muted, it stays armed for the next event.
+                    if rule.once && !st.muted {
                         st.remove_rule(rule.id);
                     }
                 }
