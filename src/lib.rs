@@ -987,7 +987,7 @@ fn answer_cell() -> (Build<SkiaShape>, AnswerCell) {
                 label("", 12).text_color(hex(pal().text_soft)).max_lines(1).assign(&mut handles.question),
                 label("", 12).text_color(hex(pal().muted)).column(1).assign(&mut handles.when),
             )),
-            label("", 13).text_color(hex(pal().text)).max_lines(2).assign(&mut handles.answer),
+            label("", 13).text_color(hex(pal().answer)).max_lines(2).assign(&mut handles.answer),
         )));
     (cell, handles)
 }

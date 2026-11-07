@@ -17,9 +17,11 @@ pub struct Palette {
     pub border: u32,
     /// The background of the banners (reopen, update).
     pub banner: u32,
-    /// Names, titles, answers.
+    /// Names, titles.
     pub text: u32,
     /// Ordinary text (menu items, the confirm question).
+    /// An answer in the Answers list: the main text, a little softer than `text`.
+    pub answer: u32,
     pub text_body: u32,
     /// Second lines, notes, the counts.
     pub text_soft: u32,
@@ -51,6 +53,7 @@ pub const DARK: Palette = Palette {
     border: 0x3B4256,
     banner: 0x1E2A44,
     text: 0xFFFFFF,
+    answer: 0xE6E6E6,
     text_body: 0xE5E7EB,
     text_soft: 0x9CA3AF,
     muted: 0x6B7280,
@@ -78,6 +81,7 @@ pub const LIGHT: Palette = Palette {
     border: 0xD1D5DB,
     banner: 0xE8F0FE,
     text: 0x111827,
+    answer: 0x292F3D,
     text_body: 0x1F2937,
     text_soft: 0x4B5563,
     muted: 0x6B7280,
