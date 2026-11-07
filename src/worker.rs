@@ -28,6 +28,8 @@ pub enum Cmd {
     ReopenOne(String),
     /// Remove a closed session from the list (its id).
     Forget(String),
+    /// Settings: the folder sessions started in the home folder reopen in (empty: as started).
+    ReopenFolder(String),
 }
 
 /// The tab layout is read again at least this often, to follow tabs moved by hand.
@@ -54,6 +56,7 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
     let mut first = true;
     let mut next_poll = Instant::now();
     let mut memory = Memory::load();
+    shared.lock().unwrap().reopen_home_in = memory.reopen_home_in.clone();
     // The session ids the layout was last read for, and when.
     let mut layout_ids: Vec<String> = Vec::new();
     let mut layout_at = Instant::now();
@@ -72,7 +75,9 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
         let mut new = poll(&dir, &mut files);
         // A turn that is over is not work, though a background shell runs; one that ended with a
         // question waits for the user.
-        turns.apply(&mut new);
+        if shared.lock().unwrap().detect_questions {
+            turns.apply(&mut new);
+        }
         for s in new.values_mut() {
             // No statusUpdatedAt in the file: the status started when it was first seen.
             if s.since_ms == 0 {
@@ -273,6 +278,13 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<
         Cmd::CloseTab(name) => tab_command(signals, shared, name, "close", Signals::close_tab),
         Cmd::Topmost(on) => platform::set_topmost(on),
         Cmd::WindowReady => platform::no_maximize(),
+        Cmd::ReopenFolder(folder) => {
+            memory.reopen_home_in = folder.clone();
+            memory.save();
+            let mut st = shared.lock().unwrap();
+            st.reopen_home_in = folder;
+            st.version += 1;
+        }
     }
 }
 

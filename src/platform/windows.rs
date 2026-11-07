@@ -10,7 +10,7 @@ use windows::UI::Notifications::{ToastNotification, ToastNotificationManager, To
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
 use windows::Win32::Media::Speech::{ISpVoice, SPF_ASYNC, SPF_IS_FILENAME, SPF_IS_NOT_XML, SpVoice};
 use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
-use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RegSetKeyValueW};
+use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW};
 use windows::Win32::System::Threading::{GetCurrentProcessId, GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationInvokePattern, IUIAutomationSelectionItemPattern, TreeScope_Descendants,
@@ -129,6 +129,36 @@ pub fn clean_after_update() {
     if let Ok(exe) = std::env::current_exe() {
         let _ = std::fs::remove_file(replaced(&exe));
     }
+}
+
+/// Windows' "app mode" is dark (Settings > Personalization > Colors).
+pub fn system_dark() -> bool {
+    let mut light: u32 = 1;
+    let mut size = size_of::<u32>() as u32;
+    let key = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+    let err = unsafe { RegGetValueW(HKEY_CURRENT_USER, key, w!("AppsUseLightTheme"), RRF_RT_REG_DWORD, None, Some((&raw mut light).cast()), Some(&mut size)) };
+    err.is_ok() && light == 0
+}
+
+/// The current user's Run key: what Windows starts at sign-in.
+const RUN: windows::core::PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+
+/// Windows starts the app at sign-in (its Run entry is there).
+pub fn starts_at_login() -> bool {
+    let mut size = 0u32;
+    unsafe { RegGetValueW(HKEY_CURRENT_USER, RUN, w!("AgentSignals"), RRF_RT_REG_SZ, None, None, Some(&mut size)) }.is_ok()
+}
+
+/// Adds or removes the Run entry that starts this exe, where it is now, at sign-in.
+pub fn set_start_at_login(on: bool) -> Result<()> {
+    let err = if on {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let command: Vec<u16> = format!("\"{}\"\0", exe.display()).encode_utf16().collect();
+        unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, RUN, w!("AgentSignals"), REG_SZ.0, Some(command.as_ptr().cast()), (command.len() * 2) as u32) }
+    } else {
+        unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, w!("AgentSignals")) }
+    };
+    if err.is_ok() || !on { Ok(()) } else { Err(format!("the sign-in entry cannot be written: {err:?}")) }
 }
 
 /// Opens a web address in the default browser.

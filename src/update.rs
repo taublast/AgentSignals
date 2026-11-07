@@ -32,16 +32,28 @@ pub fn start(shared: Shared) {
         // What an update left behind (the replaced program), once the old instance is gone.
         std::thread::sleep(Duration::from_secs(10));
         platform::clean_after_update();
+        // A minute's look at the setting: a check turned on runs within a minute, then daily.
+        let mut last: Option<std::time::Instant> = None;
         loop {
-            let found = platform::http_get(LATEST).ok().and_then(|json| newer(&json, env!("CARGO_PKG_VERSION"), platform::UPDATE_ASSET));
-            if let Some(update) = found {
+            let on = shared.lock().unwrap().check_updates;
+            if !on {
+                last = None;
                 let mut st = shared.lock().unwrap();
-                if st.update.as_ref() != Some(&update) {
-                    st.update = Some(update);
+                if st.update.take().is_some() {
                     st.version += 1;
                 }
+            } else if last.is_none_or(|t| t.elapsed() >= EVERY) {
+                last = Some(std::time::Instant::now());
+                let found = platform::http_get(LATEST).ok().and_then(|json| newer(&json, env!("CARGO_PKG_VERSION"), platform::UPDATE_ASSET));
+                if let Some(update) = found {
+                    let mut st = shared.lock().unwrap();
+                    if st.update.as_ref() != Some(&update) {
+                        st.update = Some(update);
+                        st.version += 1;
+                    }
+                }
             }
-            std::thread::sleep(EVERY);
+            std::thread::sleep(Duration::from_secs(60));
         }
     });
 }

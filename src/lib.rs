@@ -3,14 +3,17 @@
 
 mod answers;
 mod http;
+mod icons;
 mod restore;
 mod platform;
 mod state;
+mod theme;
 mod turn;
 mod update;
 mod worker;
 
 use drawnui::prelude::*;
+use theme::pal;
 use restore::Saved;
 use state::{Event, Rule, Session, Shared, Signal, State};
 use std::collections::HashMap;
@@ -19,8 +22,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use worker::Cmd;
 
 const TICK_MS: f32 = 1000.0;
-/// Blue of the switches when on.
-const ACCENT: u32 = 0x3B82F6;
 /// The switches: the engine's default width, flatter. Off: the slate of the menu borders, a light
 /// thumb; on: the accent blue.
 const SWITCH_WIDTH: f32 = 46.0;
@@ -63,6 +64,19 @@ struct App {
     /// The Answers screen while it is open, and the column its entries go in.
     answers: Option<AnswersView>,
     answers_list: Handle<SkiaLayout>,
+    /// The screen over the list: none, Settings or Help (Answers has its own state).
+    page: Page,
+    /// The window on top of others (the header switch; kept across a rebuild).
+    topmost: bool,
+    /// Copies of the settings, for the Settings screen; `start_at_login` is read from the system.
+    theme: String,
+    language: String,
+    detect_questions: bool,
+    check_updates: bool,
+    reopen_home_in: String,
+    start_at_login: bool,
+    /// Why the last setting could not be applied (the start-at-login entry, a missing folder).
+    settings_note: String,
     /// The row under the mouse: `p<pid>` for a live session, `c<id>` for a closed one.
     hovered: Option<String>,
     /// What the rows were built from: rebuilt only when it changes.
@@ -94,6 +108,13 @@ struct AnswersView {
     copied: bool,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Page {
+    Main,
+    Settings,
+    Help,
+}
+
 struct Menu {
     name: String,
     /// A closed session's id: the menu offers Reopen and Remove.
@@ -119,13 +140,38 @@ impl App {
 }
 
 fn build(app: &mut App) -> Build<SkiaLayout> {
-    SkiaLayer::new().fill().assign(&mut app.root).children((
+    SkiaLayer::new().fill().assign(&mut app.root).children((content(app),))
+}
+
+/// Builds the window's content again under the same root, for a new theme (or language): the old
+/// content goes in the same step, on the UI thread; the worker, the API and the update check live
+/// outside it. Popups close; the rows, the Answers list and the screen that was open come back.
+fn rebuild(app: &mut App, cx: &mut Cx) {
+    close_popup(app, cx);
+    app.menu = None;
+    cx.clear_children(app.root);
+    let content = content(app);
+    cx.add_child(app.root, content);
+    app.session_key = (Vec::new(), Vec::new());
+    app.seen = u64::MAX;
+    sync(app, cx);
+    if app.answers.is_some() {
+        fill_answers(app, cx);
+    }
+}
+
+fn content(app: &mut App) -> Build<SkiaLayout> {
+    SkiaLayer::new().fill().background_color(hex(pal().bg)).children((
         SkiaGrid::new().fill().column_definitions("*").row_definitions("Auto, *").row_spacing(0).children((
-            // Header: wraps to more lines in a narrow window. The title is on the window frame.
-            SkiaWrap::new().fill_x().padding((16, 12, 16, 8)).spacing(12).row(0).children((
+            // Header: wraps to more lines in a narrow window, Settings and Help at its right end. The
+            // title is on the window frame.
+            SkiaGrid::new().fill_x().column_definitions("*, Auto").row(0).children((
+            SkiaWrap::new().fill_x().padding((16, 12, 8, 8)).spacing(12).children((
                 SkiaRow::new().spacing(8).children((
                     switch("Keep window on top")
+                        .observe(|me, app: &App| me.set_is_toggled(app.topmost))
                         .on_toggled(|_me, app: &mut App, _cx, on| {
+                            app.topmost = on;
                             let _ = app.tx.send(Cmd::Topmost(on));
                         }),
                     label("On top", 14).vertical_options(LayoutOptions::Center),
@@ -143,7 +189,7 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                         }),
                     label("Mute", 14).vertical_options(LayoutOptions::Center),
                 )),
-                label("", 13).text_color(hex(0x9CA3AF)).vertical_options(LayoutOptions::Center).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
+                label("", 13).text_color(hex(pal().text_soft)).vertical_options(LayoutOptions::Center).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
                     let count = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
                     let closed = if app.inactive.is_empty() { String::new() } else { format!(" · {} closed", app.inactive.len()) };
                     let asked = match count("question") {
@@ -153,13 +199,18 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                     me.set_text(format!("{} waiting{asked} · {} busy · {} idle{closed}", count("waiting"), count("busy"), count("idle")));
                 }),
             )),
+            SkiaRow::new().column(1).spacing(2).padding((0, 10, 10, 0)).vertical_options(LayoutOptions::Start).accessibility_role(Aria::TOOLBAR).children((
+                icon_button(icons::SETTINGS, "Settings", "Opens the settings", open_settings),
+                icon_button(icons::CIRCLE_QUESTION_MARK, "Help", "Opens the help", open_help),
+            )),
+            )),
             SkiaScroll::new()
                 .fill()
                 .row(1)
                 // A vertical bar that stays visible, in the 12 pt right padding of the rows.
                 .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
-                .scroll_bar_thumb_color(hex(0x4B5563))
-                .scroll_bar_track_color(Color::new(0x14FFFFFF))
+                .scroll_bar_thumb_color(hex(pal().scroll_thumb))
+                .scroll_bar_track_color(Color::new(pal().scroll_track))
                 .keep_scroll_bars_visible(true)
                 .content(SkiaStack::new().padding((12, 0, 12, 16)).spacing(8).children((
                 reopen_banner(),
@@ -167,41 +218,297 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
                 // One Tab stop: the arrow keys move between the rows.
                 SkiaStack::new().spacing(6).accessibility_role(Aria::LIST).accessibility_label("Sessions").assign(&mut app.session_stack),
                 section("Recent"),
-                label("", 12).text_color(hex(0x9CA3AF)).accessibility_role(Aria::TEXT).observe(|me, app: &App| me.set_text(recent(app))),
+                label("", 12).text_color(hex(pal().text_soft)).accessibility_role(Aria::TEXT).observe(|me, app: &App| me.set_text(recent(app))),
                 // Which build this is, at the very bottom of the list.
-                label(concat!("Version ", env!("CARGO_PKG_VERSION")), 12).text_color(hex(IDLE)).margin((4, 8, 0, 0)).accessibility_role(Aria::TEXT),
+                label(concat!("Version ", env!("CARGO_PKG_VERSION")), 12).text_color(hex(pal().muted)).margin((4, 8, 0, 0)).accessibility_role(Aria::TEXT),
             ))),
         )),
         answers_panel(app),
+        settings_panel(),
+        help_panel(),
     ))
+}
+
+/// A header icon: a 28 pt square, the icon in the quiet text color, a veil under the mouse. The
+/// name shows as its tooltip and is what screen readers read; the hint says what it opens.
+fn icon_button(svg: &'static str, name: &str, hint: &str, tap: fn(&mut App, &mut Cx)) -> Build<SkiaShape> {
+    SkiaShape::new()
+        .corner_radius(6)
+        .width_request(28)
+        .height_request(28)
+        .vertical_options(LayoutOptions::Center)
+        .accessibility_role(Aria::BUTTON)
+        .accessibility_label(name)
+        .accessibility_hint(hint)
+        .on_hovered(|me, _app: &mut App, _cx, on| {
+            me.set_background_color(if on { hex(mix(pal().bg, pal().hover_toward, pal().hover_control)) } else { Color::TRANSPARENT });
+        })
+        .on_tapped(move |_me, app: &mut App, cx| tap(app, cx))
+        .children((SkiaSvg::from_string(svg).width_request(16).height_request(16).tint_color(hex(pal().text_soft)).horizontal_options(LayoutOptions::Center).vertical_options(LayoutOptions::Center),))
+}
+
+fn open_settings(app: &mut App, cx: &mut Cx) {
+    close_popup(app, cx);
+    app.answers = None;
+    app.start_at_login = platform::starts_at_login();
+    app.settings_note.clear();
+    app.page = Page::Settings;
+}
+
+fn open_help(app: &mut App, cx: &mut Cx) {
+    close_popup(app, cx);
+    app.answers = None;
+    app.page = Page::Help;
+}
+
+/// A screen over the list (Settings, Help): Back and a title, then its content scrolling.
+fn screen(page: Page, title: &str, body: Build<SkiaLayout>) -> Build<SkiaShape> {
+    SkiaShape::new()
+        .fill()
+        .background_color(hex(pal().bg))
+        .padding((12, 10, 12, 12))
+        .observe(move |me, app: &App| me.set_is_visible(app.page == page))
+        .accessibility_role(Aria::DIALOG)
+        .accessibility_label(title)
+        .children(SkiaGrid::new().fill().column_definitions("*").row_definitions("Auto, *").row_spacing(12).children((
+            SkiaGrid::new().fill_x().column_definitions("Auto, *").column_spacing(10).row(0).children((
+                back_button(),
+                label(title, 16).column(1).text_color(hex(pal().text)).vertical_options(LayoutOptions::Center).accessibility_role(Aria::HEADING),
+            )),
+            SkiaScroll::new()
+                .fill()
+                .row(1)
+                .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
+                .scroll_bar_thumb_color(hex(pal().scroll_thumb))
+                .scroll_bar_track_color(Color::new(pal().scroll_track))
+                .content(body.padding((0, 0, 12, 16))),
+        )))
+}
+
+/// A section title inside a screen.
+fn heading(text: &str) -> Build<SkiaLabel> {
+    label(text, 13).text_color(hex(pal().text_soft)).margin((0, 8, 0, 0)).accessibility_role(Aria::HEADING)
+}
+
+/// One choice of a group (a theme): the chosen one filled with the accent, the others outlined.
+fn chip(text: &str, chosen: impl Fn(&App) -> bool + Clone + 'static, pick: impl Fn(&mut App, &mut Cx) + 'static) -> Build<SkiaShape> {
+    let (look, chosen_text) = (chosen.clone(), chosen.clone());
+    SkiaShape::new()
+        .corner_radius(8)
+        .padding((12, 6, 12, 6))
+        .stroke_width(1.55)
+        .accessibility_role(Aria::RADIO)
+        .accessibility_label(text)
+        .observe(move |me, app: &App| {
+            let on = look(app);
+            me.set_background_color(if on { hex(pal().accent) } else { Color::TRANSPARENT });
+            me.set_stroke_color(if on { hex(pal().accent) } else { hex(pal().border) });
+            me.set_accessibility_is_pressed(Some(on));
+        })
+        .on_hovered(move |me, app: &mut App, _cx, over| {
+            if !chosen(app) {
+                me.set_background_color(if over { hex(mix(pal().bg, pal().hover_toward, pal().hover_control)) } else { Color::TRANSPARENT });
+            }
+        })
+        .on_tapped(move |_me, app: &mut App, cx| pick(app, cx))
+        .children((label(text, 13).observe(move |me, app: &App| {
+            me.set_text_color(if chosen_text(app) { Color::WHITE } else { hex(pal().text_body) });
+        }),))
+}
+
+/// A setting that is on or off: its name and what it does, the switch at the right.
+fn setting_switch(name: &str, about: &str, get: fn(&App) -> bool, set: fn(&mut App, &mut Cx, bool)) -> Build<SkiaLayout> {
+    SkiaGrid::new().fill_x().column_definitions("*, Auto").column_spacing(12).children((
+        SkiaStack::new().spacing(2).vertical_options(LayoutOptions::Center).children((
+            label(name, 14).text_color(hex(pal().text)),
+            label(about, 12).text_color(hex(pal().text_soft)),
+        )),
+        switch(name).column(1).observe(move |me, app: &App| me.set_is_toggled(get(app))).on_toggled(move |_me, app: &mut App, cx, on| {
+            if get(app) != on {
+                set(app, cx, on);
+            }
+        }),
+    ))
+}
+
+/// The settings saved for the worker, the update check and the next start.
+fn save_settings(app: &App) {
+    let mut st = app.shared.lock().unwrap();
+    st.theme = app.theme.clone();
+    st.language = app.language.clone();
+    st.detect_questions = app.detect_questions;
+    st.check_updates = app.check_updates;
+    st.settings_changed();
+}
+
+/// Settings: Appearance (theme), Sessions (questions, reopen folder), App (start at login, updates),
+/// About.
+fn settings_panel() -> Build<SkiaShape> {
+    let theme = |name: &'static str, text: &'static str| {
+        chip(text, move |app: &App| app.theme == name, move |app: &mut App, cx| {
+            app.theme = name.to_string();
+            save_settings(app);
+            theme::set(name);
+            rebuild(app, cx);
+        })
+    };
+    let login = if cfg!(windows) { "Start with Windows" } else { "Open at login" };
+    screen(
+        Page::Settings,
+        "Settings",
+        SkiaStack::new().spacing(20).children((
+            SkiaStack::new().spacing(10).children((
+            heading("Appearance"),
+            label("Theme", 14).text_color(hex(pal().text)),
+            SkiaWrap::new().spacing(8).accessibility_role(Aria::RADIO_GROUP).accessibility_label("Theme").children((
+                theme("system", "System"),
+                theme("dark", "Dark"),
+                theme("light", "Light"),
+            )),
+            )),
+            SkiaStack::new().spacing(10).children((
+            heading("Sessions"),
+            setting_switch(
+                "Detect questions",
+                "A session whose last answer asks you something turns blue, with the question on its row.",
+                |app| app.detect_questions,
+                |app, _cx, on| {
+                    app.detect_questions = on;
+                    save_settings(app);
+                },
+            ),
+            label("Reopen home-folder sessions in", 14).text_color(hex(pal().text)),
+            SkiaEditor::new()
+                .fill_x()
+                .font_size(13)
+                .background_color(hex(pal().row))
+                .text_color(hex(pal().text))
+                .placeholder_color(hex(pal().muted))
+                .cursor_color(hex(pal().accent))
+                .stroke_color(hex(pal().border))
+                .stroke_width(1.55)
+                .corner_radius(8)
+                .placeholder_text("Their own folder")
+                .accessibility_label("Reopen home-folder sessions in")
+                .observe(|me, app: &App| {
+                    if !me.is_focused() {
+                        me.set_text(app.reopen_home_in.clone());
+                    }
+                })
+                .on_text_changed(|_me, app: &mut App, _cx, text| {
+                    let folder = text.trim().to_string();
+                    if folder.is_empty() || std::path::Path::new(&folder).is_dir() {
+                        app.settings_note.clear();
+                        app.reopen_home_in = folder.clone();
+                        let _ = app.tx.send(Cmd::ReopenFolder(folder));
+                    } else {
+                        app.settings_note = "No such folder.".into();
+                    }
+                }),
+            label("Claude Code asks to trust the home folder every time; a folder you trusted once does not. Empty: each session reopens in its own folder.", 12).text_color(hex(pal().text_soft)),
+            )),
+            SkiaStack::new().spacing(10).children((
+            heading("App"),
+            setting_switch(login, "Agent Signals starts when you sign in, from where it is now.", |app| app.start_at_login, |app, _cx, on| {
+                match platform::set_start_at_login(on) {
+                    Ok(()) => {
+                        app.start_at_login = on;
+                        app.settings_note.clear();
+                    }
+                    Err(why) => app.settings_note = why,
+                }
+            }),
+            setting_switch(
+                "Check for updates",
+                "Asks GitHub for a newer version at start and once a day.",
+                |app| app.check_updates,
+                |app, _cx, on| {
+                    app.check_updates = on;
+                    save_settings(app);
+                },
+            ),
+            label("", 12).text_color(hex(pal().finished)).accessibility_role(Aria::TEXT).accessibility_live(Aria::LIVE_POLITE).observe(|me, app: &App| {
+                me.set_is_visible(!app.settings_note.is_empty());
+                me.set_text(app.settings_note.clone());
+            }),
+            )),
+            SkiaStack::new().spacing(10).children((
+            heading("About"),
+            label(concat!("Agent Signals ", env!("CARGO_PKG_VERSION")), 14).text_color(hex(pal().text)).accessibility_role(Aria::TEXT),
+            tool_button(|_| ("↗", "github.com/taublast/AgentSignals")).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals")),
+            )),
+        )),
+    )
+}
+
+/// A line of Help's color list: the status dot as on a row, then what it means.
+fn dot_line(color: u32, text: &str) -> Build<SkiaLayout> {
+    SkiaGrid::new().fill_x().column_definitions("Auto, *").column_spacing(10).children((
+        SkiaShape::new().corner_radius(5).width_request(10).height_request(10).vertical_options(LayoutOptions::Center).background_color(hex(color)),
+        label(text, 13).column(1).text_color(hex(pal().text_body)).accessibility_role(Aria::TEXT),
+    ))
+}
+
+/// Help: what the colors mean, what clicks and keys do, and where agents talk to the app.
+fn help_panel() -> Build<SkiaShape> {
+    let text = |t: &str| label(t, 13).text_color(hex(pal().text_body)).accessibility_role(Aria::TEXT);
+    screen(
+        Page::Help,
+        "Help",
+        SkiaStack::new().spacing(16).children((
+            SkiaStack::new().spacing(6).children((
+            heading("The rows"),
+            dot_line(pal().waiting, "Claude Code waits for you: a permission dialog or an input prompt."),
+            dot_line(pal().question, "The last answer asked you something; the question is on the row."),
+            dot_line(pal().busy, "The session is working."),
+            dot_line(pal().finished, "It just finished and you have not looked yet."),
+            dot_line(pal().idle, "Idle, or closed."),
+            )),
+            SkiaStack::new().spacing(6).children((
+            heading("Clicks"),
+            text("Click a row to bring its terminal tab, or its VS Code window, to the front. Click a closed row to reopen it."),
+            text("Right-click a row (or the Menu key) for its menu: copy its name, its Answers, signals for when it finishes, a tint, closing it."),
+            )),
+            SkiaStack::new().spacing(6).children((
+            heading("Answers"),
+            text("Every question you asked in a session with Claude's answer, newest first. Search them, open one to read or copy it, pin the ones that matter so they stay on top. Right-click an answer to open, pin or copy it."),
+            )),
+            SkiaStack::new().spacing(6).children((
+            heading("Keys"),
+            text("Tab and the arrow keys move through the list, Enter clicks, Escape goes back. Ctrl+, opens Settings, F1 this help."),
+            )),
+            SkiaStack::new().spacing(6).children((
+            heading("For agents"),
+            text("Claude agents set up signals through the app's local API at http://127.0.0.1:47801; open it in a browser for the list of calls."),
+            )),
+        )),
+    )
 }
 
 /// A header switch, named for screen readers; under the mouse its track is a little lighter.
 fn switch(name: &str) -> Build<SkiaSwitch> {
-    let (on, off) = (ACCENT, 0x3B4256);
+    let (on, off) = (pal().accent, pal().border);
     SkiaSwitch::new()
         .color_frame_on(hex(on))
         .width_request(SWITCH_WIDTH)
         .height_request(SWITCH_HEIGHT)
         .color_frame_off(hex(off))
-        .color_thumb_off(hex(0xC9CDD4))
+        .color_thumb_off(hex(pal().thumb_off))
         .accessibility_label(name)
         .vertical_options(LayoutOptions::Center)
         .on_hovered(move |me, _app: &mut App, _cx, hovered| {
-            let lift = |c: u32| hex(if hovered { mix(c, 0xFFFFFF, SWITCH_HOVER) } else { c });
+            let lift = |c: u32| hex(if hovered { mix(c, pal().hover_toward, pal().hover_control) } else { c });
             me.set_color_frame_on(Some(lift(on)));
             me.set_color_frame_off(Some(lift(off)));
         })
 }
 
-/// White mixed into a switch's track or a button under the mouse.
-const SWITCH_HOVER: f32 = 0.15;
 
 /// A button in the app's colors; under the mouse it is a little lighter, as the switches are.
 /// Screen readers and the keyboard take it as a button (`ui`) and read its caption.
 fn button(text: &str, color: u32) -> Build<SkiaButton> {
     SkiaButton::new(text).font_size(13).background_color(hex(color)).on_hovered(move |me, _app: &mut App, _cx, hovered| {
-        me.set_background_color(hex(if hovered { mix(color, 0xFFFFFF, SWITCH_HOVER) } else { color }));
+        me.set_background_color(hex(if hovered { mix(color, pal().hover_toward, pal().hover_control) } else { color }));
     })
 }
 
@@ -209,8 +516,8 @@ fn button(text: &str, color: u32) -> Build<SkiaButton> {
 fn reopen_banner() -> Build<SkiaShape> {
     SkiaShape::new()
         .corner_radius(10)
-        .background_color(hex(0x1E2A44))
-        .stroke_color(hex(ACCENT))
+        .background_color(hex(pal().banner))
+        .stroke_color(hex(pal().accent))
         .stroke_width(1.55)
         .padding((12, 10, 12, 12))
         .fill_x()
@@ -218,13 +525,13 @@ fn reopen_banner() -> Build<SkiaShape> {
         .accessibility_role(Aria::REGION)
         .accessibility_label("Sessions from last time")
         .children(SkiaStack::new().spacing(8).children((
-            label("", 14).text_color(Color::WHITE).accessibility_role(Aria::TEXT).accessibility_live(Aria::LIVE_POLITE).observe(|me, app: &App| {
+            label("", 14).text_color(hex(pal().text)).accessibility_role(Aria::TEXT).accessibility_live(Aria::LIVE_POLITE).observe(|me, app: &App| {
                 let n = app.reopen.len();
                 me.set_text(format!("{n} session{} from last time {} closed", if n == 1 { "" } else { "s" }, if n == 1 { "is" } else { "are" }));
             }),
-            label("", 12).text_color(hex(0x9CA3AF)).max_lines(4).accessibility_role(Aria::TEXT).observe(|me, app: &App| me.set_text(app.reopen.join(", "))),
+            label("", 12).text_color(hex(pal().text_soft)).max_lines(4).accessibility_role(Aria::TEXT).observe(|me, app: &App| me.set_text(app.reopen.join(", "))),
             SkiaRow::new().spacing(8).children((
-                button("", ACCENT)
+                button("", pal().accent)
                     .accessibility_label("Reopen sessions from last time")
                     .observe(|me, app: &App| {
                         let n = app.reopen.len();
@@ -233,7 +540,7 @@ fn reopen_banner() -> Build<SkiaShape> {
                     .on_tapped(|_me, app: &mut App, _cx| {
                         let _ = app.tx.send(Cmd::Reopen);
                     }),
-                button("Not now", 0x3B4256).on_tapped(|_me, app: &mut App, _cx| {
+                button("Not now", pal().border).on_tapped(|_me, app: &mut App, _cx| {
                     let _ = app.tx.send(Cmd::Dismiss);
                 }),
             )),
@@ -244,8 +551,8 @@ fn reopen_banner() -> Build<SkiaShape> {
 fn update_banner() -> Build<SkiaShape> {
     SkiaShape::new()
         .corner_radius(10)
-        .background_color(hex(0x1E2A44))
-        .stroke_color(hex(ACCENT))
+        .background_color(hex(pal().banner))
+        .stroke_color(hex(pal().accent))
         .stroke_width(1.55)
         .padding((12, 10, 12, 12))
         .fill_x()
@@ -253,7 +560,7 @@ fn update_banner() -> Build<SkiaShape> {
         .accessibility_role(Aria::REGION)
         .accessibility_label("Update")
         .children(SkiaStack::new().spacing(8).children((
-            label("", 14).text_color(Color::WHITE).accessibility_role(Aria::TEXT).accessibility_live(Aria::LIVE_POLITE).observe(|me, app: &App| {
+            label("", 14).text_color(hex(pal().text)).accessibility_role(Aria::TEXT).accessibility_live(Aria::LIVE_POLITE).observe(|me, app: &App| {
                 if let Some(u) = offered(app) {
                     me.set_text(match &app.install {
                         update::Install::Idle => format!("Agent Signals {} is available", u.version),
@@ -264,7 +571,7 @@ fn update_banner() -> Build<SkiaShape> {
             }),
             // While it downloads: no buttons. After a failure the browser takes over.
             SkiaRow::new().spacing(8).observe(|me, app: &App| me.set_is_visible(app.install != update::Install::Downloading)).children((
-                button("Update and restart", ACCENT)
+                button("Update and restart", pal().accent)
                     .observe(|me, app: &App| me.set_is_visible(app.install == update::Install::Idle))
                     .on_tapped(|_me, app: &mut App, _cx| {
                         if let Some(u) = offered(app).cloned() {
@@ -273,14 +580,14 @@ fn update_banner() -> Build<SkiaShape> {
                             update::install(app.shared.clone(), u);
                         }
                     }),
-                button("Download", ACCENT)
+                button("Download", pal().accent)
                     .observe(|me, app: &App| me.set_is_visible(matches!(app.install, update::Install::Failed(_))))
                     .on_tapped(|_me, app: &mut App, _cx| {
                         if let Some(u) = offered(app) {
                             platform::open_url(&u.url);
                         }
                     }),
-                button("Later", 0x3B4256).on_tapped(move |_me, app: &mut App, _cx| {
+                button("Later", pal().border).on_tapped(move |_me, app: &mut App, _cx| {
                     if let Some(version) = offered(app).map(|u| u.version.clone()) {
                         // The window's copy too, at once: the banner goes now, not at the next sync.
                         app.skipped_update = version.clone();
@@ -340,7 +647,7 @@ fn pinned(app: &App, entry: &answers::Answer) -> bool {
 
 /// A list cell's background: pinned ones carry a hint of the accent; lighter under the mouse.
 fn cell_color(pinned: bool, hovered: bool) -> Color {
-    row_color(pinned.then_some(ACCENT), false, hovered)
+    row_color(pinned.then_some(pal().accent), false, hovered)
 }
 
 /// The entry a recycled cell shows now.
@@ -365,7 +672,7 @@ fn answer_cell() -> (Build<SkiaShape>, AnswerCell) {
     let mut handles = AnswerCell::default();
     let cell = SkiaShape::new()
         .corner_radius(8)
-        .background_color(hex(ROW))
+        .background_color(hex(pal().row))
         .padding((10, 8, 10, 8))
         .fill_x()
         // One bitmap per cell, blitted while scrolling; the ripple is drawn over it.
@@ -404,10 +711,10 @@ fn answer_cell() -> (Build<SkiaShape>, AnswerCell) {
         .assign(&mut handles.cell)
         .children(SkiaStack::new().spacing(3).children((
             SkiaGrid::new().fill_x().column_definitions("*, Auto").column_spacing(8).children((
-                label("", 12).text_color(hex(0x9CA3AF)).max_lines(1).assign(&mut handles.question),
-                label("", 12).text_color(hex(IDLE)).column(1).assign(&mut handles.when),
+                label("", 12).text_color(hex(pal().text_soft)).max_lines(1).assign(&mut handles.question),
+                label("", 12).text_color(hex(pal().muted)).column(1).assign(&mut handles.when),
             )),
-            label("", 13).text_color(Color::WHITE).max_lines(2).assign(&mut handles.answer),
+            label("", 13).text_color(hex(pal().text)).max_lines(2).assign(&mut handles.answer),
         )));
     (cell, handles)
 }
@@ -457,7 +764,7 @@ fn answers_panel(app: &mut App) -> Build<SkiaShape> {
     let listing = |app: &App| app.answers.as_ref().is_some_and(|v| v.open.is_none());
     SkiaShape::new()
         .fill()
-        .background_color(hex(0x12141C))
+        .background_color(hex(pal().bg))
         .padding((12, 10, 12, 12))
         .observe(|me, app: &App| {
             me.set_is_visible(app.answers.is_some());
@@ -471,8 +778,8 @@ fn answers_panel(app: &mut App) -> Build<SkiaShape> {
             SkiaGrid::new().fill_x().column_definitions("Auto, *").column_spacing(10).row(0).children((
                 back_button(),
                 SkiaStack::new().column(1).spacing(0).vertical_options(LayoutOptions::Center).children((
-                    label("Answers", 16).text_color(Color::WHITE).accessibility_role(Aria::HEADING),
-                    label("", 12).text_color(hex(0x9CA3AF)).max_lines(1).observe(|me, app: &App| {
+                    label("Answers", 16).text_color(hex(pal().text)).accessibility_role(Aria::HEADING),
+                    label("", 12).text_color(hex(pal().text_soft)).max_lines(1).observe(|me, app: &App| {
                         if let Some(view) = &app.answers {
                             me.set_text(view.name.clone());
                         }
@@ -485,11 +792,11 @@ fn answers_panel(app: &mut App) -> Build<SkiaShape> {
                 .row(1)
                 .fill_x()
                 .font_size(14)
-                .background_color(hex(ROW))
-                .text_color(Color::WHITE)
-                .placeholder_color(hex(IDLE))
-                .cursor_color(hex(ACCENT))
-                .stroke_color(hex(0x3B4256))
+                .background_color(hex(pal().row))
+                .text_color(hex(pal().text))
+                .placeholder_color(hex(pal().muted))
+                .cursor_color(hex(pal().accent))
+                .stroke_color(hex(pal().border))
                 .stroke_width(1.55)
                 .corner_radius(8)
                 .placeholder_text("Search questions and answers")
@@ -530,7 +837,7 @@ fn answers_panel(app: &mut App) -> Build<SkiaShape> {
                 )),
             // The list, or why there is none.
             SkiaLayer::new().fill().row(2).observe(move |me, app: &App| me.set_is_visible(listing(app))).children((
-                label("", 13).text_color(hex(0x9CA3AF)).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
+                label("", 13).text_color(hex(pal().text_soft)).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
                     let Some(view) = &app.answers else { return };
                     let text = match &view.list {
                         None => "Reading the conversation…".to_string(),
@@ -545,8 +852,8 @@ fn answers_panel(app: &mut App) -> Build<SkiaShape> {
                 SkiaScroll::new()
                     .fill()
                     .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
-                    .scroll_bar_thumb_color(hex(0x4B5563))
-                    .scroll_bar_track_color(Color::new(0x14FFFFFF))
+                    .scroll_bar_thumb_color(hex(pal().scroll_thumb))
+                    .scroll_bar_track_color(Color::new(pal().scroll_track))
                     .content(
                         // Recycled cells, measured as they come into view: rows differ in height.
                         SkiaStack::new()
@@ -565,16 +872,16 @@ fn answers_panel(app: &mut App) -> Build<SkiaShape> {
                 .fill()
                 .row(2)
                 .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
-                .scroll_bar_thumb_color(hex(0x4B5563))
-                .scroll_bar_track_color(Color::new(0x14FFFFFF))
+                .scroll_bar_thumb_color(hex(pal().scroll_thumb))
+                .scroll_bar_track_color(Color::new(pal().scroll_track))
                 .observe(|me, app: &App| me.set_is_visible(opened(app).is_some()))
                 .content(SkiaStack::new().spacing(10).padding((0, 0, 10, 0)).children((
-                    label("", 12).text_color(hex(IDLE)).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
+                    label("", 12).text_color(hex(pal().muted)).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
                         let when = opened(app).map(|e| asked(app, e)).unwrap_or_default();
                         me.set_is_visible(!when.is_empty());
                         me.set_text(when);
                     }),
-                    label("", 13).text_color(hex(0x9CA3AF)).accessibility_role(Aria::TEXT).accessibility_text_selectable(true).observe(|me, app: &App| {
+                    label("", 13).text_color(hex(pal().text_soft)).accessibility_role(Aria::TEXT).accessibility_text_selectable(true).observe(|me, app: &App| {
                         if let Some(entry) = opened(app) {
                             me.set_text(entry.question.clone());
                         }
@@ -594,18 +901,22 @@ fn back_button() -> Build<SkiaShape> {
         .corner_radius(8)
         .padding((8, 5, 12, 5))
         .vertical_options(LayoutOptions::Center)
-        .stroke_color(hex(0x3B4256))
+        .stroke_color(hex(pal().border))
         .stroke_width(1.55)
         .accessibility_role(Aria::BUTTON)
         .accessibility_label("Back")
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .on_hovered(hover_item)
         .on_tapped(|_me, app: &mut App, cx| go_back(app, cx))
-        .children((label("←  Back", 13).text_color(Color::WHITE),))
+        .children((label("←  Back", 13).text_color(hex(pal().text)),))
 }
 
 fn go_back(app: &mut App, cx: &mut Cx) {
     close_popup(app, cx);
+    if app.page != Page::Main {
+        app.page = Page::Main;
+        return;
+    }
     match &mut app.answers {
         Some(view) if view.open.is_some() => view.open = None,
         _ => app.answers = None,
@@ -669,21 +980,21 @@ fn answer_menu_panel() -> Build<SkiaShape> {
     };
     SkiaShape::new()
         .corner_radius(8)
-        .background_color(hex(0x262B3B))
-        .stroke_color(hex(0x3B4256))
+        .background_color(hex(pal().panel))
+        .stroke_color(hex(pal().border))
         .stroke_width(1.55)
         .width_request(MENU_WIDTH)
         .padding((4, 4, 4, 4))
         .children(SkiaStack::new().children((
             // Title bar: which question this answer belongs to, one line.
-            label("", 12).text_color(hex(0x9CA3AF)).max_lines(1).padding((12, 4, 12, 4)).observe(move |me, app: &App| {
+            label("", 12).text_color(hex(pal().text_soft)).max_lines(1).padding((12, 4, 12, 4)).observe(move |me, app: &App| {
                 let Some(view) = &app.answers else { return };
                 let Some(Ok(list)) = &view.list else { return };
                 if let Some(entry) = target(app).and_then(|i| list.get(i)) {
                     me.set_text(entry.question.split_whitespace().collect::<Vec<_>>().join(" "));
                 }
             }),
-            SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(0x3B4256)),
+            SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(pal().border)),
             SkiaStack::new().accessibility_role(Aria::MENU).accessibility_label("Answer").children((
                 menu_item("📖", "Open", |app, _cx| {
                     if let Some(view) = &mut app.answers {
@@ -754,12 +1065,6 @@ const TINTS: [(&str, Option<u32>); 9] = [
     ("Pink", Some(0xEC4899)),
     ("Slate", Some(0x64748B)),
 ];
-const ROW: u32 = 0x1C2030;
-/// The row of a session that needs a look (waiting, working, just finished): a little brighter
-/// than the resting row, with the same low saturation as the app's panels.
-const ROW_ACTIVE: u32 = 0x30374B;
-/// White mixed into a row under the mouse.
-const ROW_HOVER: f32 = 0.06;
 const SWATCH: f32 = 26.0;
 const PALETTE_WIDTH: f32 = 9.0 * SWATCH + 8.0 * 6.0 + 2.0 * 12.0 + 8.0;
 
@@ -767,9 +1072,9 @@ const PALETTE_WIDTH: f32 = 9.0 * SWATCH + 8.0 * 6.0 + 2.0 * 12.0 + 8.0;
 /// active and 10 % at rest, so text stays readable either way.
 /// Under the mouse it is a little lighter.
 fn row_color(tint: Option<u32>, active: bool, hovered: bool) -> Color {
-    let (base, amount) = if active { (ROW_ACTIVE, 0.3) } else { (ROW, 0.1) };
+    let (base, amount) = if active { (pal().row_active, 0.3) } else { (pal().row, 0.1) };
     let row = tint.map_or(base, |t| mix(base, t, amount));
-    hex(if hovered { mix(row, 0xFFFFFF, ROW_HOVER) } else { row })
+    hex(if hovered { mix(row, pal().hover_toward, pal().hover_row) } else { row })
 }
 
 /// `amount` of `to` mixed into `from`, per channel.
@@ -785,18 +1090,18 @@ fn mix(from: u32, to: u32, amount: f32) -> u32 {
 fn palette_panel() -> Build<SkiaShape> {
     SkiaShape::new()
         .corner_radius(8)
-        .background_color(hex(0x262B3B))
-        .stroke_color(hex(0x3B4256))
+        .background_color(hex(pal().panel))
+        .stroke_color(hex(pal().border))
         .stroke_width(1.55)
         .width_request(PALETTE_WIDTH)
         .padding((4, 4, 4, 4))
         .children(SkiaStack::new().children((
-            label("", 12).text_color(hex(0x9CA3AF)).max_lines(1).padding((12, 4, 12, 4)).observe(|me, app: &App| {
+            label("", 12).text_color(hex(pal().text_soft)).max_lines(1).padding((12, 4, 12, 4)).observe(|me, app: &App| {
                 if let Some(m) = &app.menu {
                     me.set_text(m.name.clone());
                 }
             }),
-            SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(0x3B4256)),
+            SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(pal().border)),
             // The menu role on the row that holds the colors: Left / Right move between them.
             SkiaRow::new()
                 .spacing(6)
@@ -816,9 +1121,9 @@ fn swatch(name: &'static str, color: Option<u32>) -> Build<SkiaShape> {
     let ring = move |app: &App, hovered: bool| {
         let current = app.menu.as_ref().is_some_and(|m| app.tint(&m.name) == color);
         if current {
-            Color::WHITE
+            hex(pal().text)
         } else if hovered {
-            hex(0x9CA3AF)
+            hex(pal().text_soft)
         } else {
             Color::TRANSPARENT
         }
@@ -827,7 +1132,7 @@ fn swatch(name: &'static str, color: Option<u32>) -> Build<SkiaShape> {
         .corner_radius(SWATCH / 2.0)
         .width_request(SWATCH)
         .height_request(SWATCH)
-        .background_color(color.map_or(hex(ROW), hex))
+        .background_color(color.map_or(hex(pal().row), hex))
         .stroke_width(2)
         .accessibility_role(Aria::MENU_ITEM_RADIO)
         .accessibility_label(name)
@@ -844,7 +1149,7 @@ fn swatch(name: &'static str, color: Option<u32>) -> Build<SkiaShape> {
             menu_done(app, cx);
         })
         // "None" is the plain row with a cross on it.
-        .children((label(if color.is_none() { "✕" } else { "" }, 12).text_color(hex(0x9CA3AF)).horizontal_options(LayoutOptions::Center).vertical_options(LayoutOptions::Center),))
+        .children((label(if color.is_none() { "✕" } else { "" }, 12).text_color(hex(pal().text_soft)).horizontal_options(LayoutOptions::Center).vertical_options(LayoutOptions::Center),))
 }
 
 /// After a menu action: an action that is done with the menu (took `app.menu`) closes its popup.
@@ -860,15 +1165,15 @@ fn menu_done(app: &mut App, cx: &mut Cx) {
 fn menu_panel() -> Build<SkiaShape> {
     SkiaShape::new()
             .corner_radius(8)
-            .background_color(hex(0x262B3B))
-            .stroke_color(hex(0x3B4256))
+            .background_color(hex(pal().panel))
+            .stroke_color(hex(pal().border))
             .stroke_width(1.55)
             .width_request(MENU_WIDTH)
             .padding((4, 4, 4, 4))
             .children(SkiaStack::new().children((
                 // Title bar: whose menu this is, one line, so the wrong session is not touched.
                 label("", 12)
-                    .text_color(hex(0x9CA3AF))
+                    .text_color(hex(pal().text_soft))
                     .max_lines(1)
                     .padding((12, 4, 12, 4))
                     .observe(|me, app: &App| {
@@ -876,7 +1181,7 @@ fn menu_panel() -> Build<SkiaShape> {
                             me.set_text(m.name.clone());
                         }
                     }),
-                SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(0x3B4256)),
+                SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(pal().border)),
                 // The menu role sits on the column that holds the items: the arrows move between them.
                 SkiaStack::new().accessibility_role(Aria::MENU).observe(|me, app: &App| {
                     me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.closed.is_none() && !m.confirm));
@@ -940,13 +1245,13 @@ fn menu_panel() -> Build<SkiaShape> {
                             }
                         }),
                         SkiaRow::new().spacing(8).children((
-                            button("Close tab", 0xDC2626).width_request(100).on_tapped(|_me, app: &mut App, cx| {
+                            button("Close tab", pal().danger).width_request(100).on_tapped(|_me, app: &mut App, cx| {
                                 if let Some(m) = app.menu.take() {
                                     let _ = app.tx.send(Cmd::CloseTab(m.name));
                                 }
                                 menu_done(app, cx);
                             }),
-                            button("Cancel", 0x3B4256).width_request(100).on_tapped(|_me, app: &mut App, cx| {
+                            button("Cancel", pal().border).width_request(100).on_tapped(|_me, app: &mut App, cx| {
                                 app.menu = None;
                                 menu_done(app, cx);
                             }),
@@ -1013,34 +1318,28 @@ fn menu_item(icon: &str, text: &str, action: fn(&mut App, &mut Cx)) -> Build<Ski
 
 /// A menu item under the mouse takes the panel's border color.
 fn hover_item(me: &mut Mut<'_, SkiaShape>, _app: &mut App, _cx: &mut Cx, on: bool) {
-    me.set_background_color(if on { hex(0x3B4256) } else { Color::TRANSPARENT });
+    me.set_background_color(if on { hex(pal().border) } else { Color::TRANSPARENT });
 }
 
 /// Emoji (status, rule icons, agents' notes) come from the system's emoji font.
 fn label(text: &str, size: i32) -> Build<SkiaLabel> {
-    SkiaLabel::new(text).font_size(size).text_color(hex(0xE5E7EB)).system_font_fallback(true)
+    SkiaLabel::new(text).font_size(size).text_color(hex(pal().text_body)).system_font_fallback(true)
 }
 
 fn section(title: &str) -> Build<SkiaLabel> {
-    label(title, 13).text_color(hex(0x9CA3AF)).margin((4, 12, 0, 0)).accessibility_role(Aria::HEADING)
+    label(title, 13).text_color(hex(pal().text_soft)).margin((4, 12, 0, 0)).accessibility_role(Aria::HEADING)
 }
 
-/// A session whose last answer asked you something: sky blue, apart from the waiting yellow.
-const QUESTION: u32 = 0x38BDF8;
-/// Idle and closed sessions: the quiet gray.
-const IDLE: u32 = 0x6B7280;
-/// The dot of a session that just finished, until its row is clicked or it works again.
-const FINISHED: u32 = 0xEF4444;
 
 fn status_color(status: &str) -> Color {
     match status {
         // Yellow: Claude Code waits for you (a permission dialog, an input prompt). Blue: the last
         // answer asked you something. Green works, gray rests (as closed sessions are gray); red is
         // `FINISHED`, an idle session not looked at yet.
-        "waiting" => hex(0xFACC15),
-        "question" => hex(QUESTION),
-        "busy" => hex(0x22C55E),
-        _ => hex(IDLE),
+        "waiting" => hex(pal().waiting),
+        "question" => hex(pal().question),
+        "busy" => hex(pal().busy),
+        _ => hex(pal().idle),
     }
 }
 
@@ -1057,7 +1356,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
     let shade = color.clone();
     SkiaShape::new()
         .corner_radius(10)
-        .background_color(hex(ROW))
+        .background_color(hex(pal().row))
         .observe(move |me, app: &App| {
             me.set_background_color(color(app));
             // Read out: the name, what it does now, where it runs.
@@ -1107,24 +1406,24 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                     let Some(s) = app.session(pid) else { return };
                     // A question stays blue until it is answered; else red until the row is clicked.
                     let unseen = app.unseen.contains(&s.id) && s.status != "question";
-                    me.set_background_color(if unseen { hex(FINISHED) } else { status_color(&s.status) });
+                    me.set_background_color(if unseen { hex(pal().finished) } else { status_color(&s.status) });
                 }),
             SkiaStack::new().margin((22, 0, 84, 0)).spacing(2).children((
                 SkiaRow::new().spacing(6).children((
-                    label(&name, 15).text_color(Color::WHITE).vertical_options(LayoutOptions::Center).observe(move |me, app: &App| {
+                    label(&name, 15).text_color(hex(pal().text)).vertical_options(LayoutOptions::Center).observe(move |me, app: &App| {
                         let icons = state::rule_icons(&app.rules, &name);
                         me.set_text(if icons.is_empty() { name.clone() } else { format!("{name}  {icons}") });
                     }),
                     // Runs in VS Code, not in a terminal.
                     SkiaShape::new()
                         .corner_radius(4)
-                        .background_color(hex(0x3B4256))
+                        .background_color(hex(pal().border))
                         .padding((5, 1, 5, 1))
                         .vertical_options(LayoutOptions::Center)
                         .observe(move |me, app: &App| me.set_is_visible(app.session(pid).is_some_and(|s| s.vscode)))
-                        .children((label("VSC", 10).text_color(hex(0xC9CDD4)),)),
+                        .children((label("VSC", 10).text_color(hex(pal().text_body)),)),
                 )),
-                label("", 12).text_color(hex(0x9CA3AF)).max_lines(2).observe(move |me, app: &App| {
+                label("", 12).text_color(hex(pal().text_soft)).max_lines(2).observe(move |me, app: &App| {
                     let Some(s) = app.session(pid) else { return };
                     let note = app.notes.get(&s.name.to_lowercase()).map_or("", |n| n.as_str());
                     let text = if !note.is_empty() {
@@ -1166,7 +1465,7 @@ fn closed_row(id: String, name: String) -> Build<SkiaShape> {
     let (shade, hover_key) = (color.clone(), format!("c{id}"));
     SkiaShape::new()
         .corner_radius(10)
-        .background_color(hex(ROW))
+        .background_color(hex(pal().row))
         .observe(move |me, app: &App| me.set_background_color(color(app)))
         .on_hovered(move |me, app: &mut App, _cx, on| {
             app.hovered = on.then(|| hover_key.clone());
@@ -1193,17 +1492,17 @@ fn closed_row(id: String, name: String) -> Build<SkiaShape> {
             true
         })
         .children((
-            SkiaShape::new().corner_radius(5).width_request(10).height_request(10).vertical_options(LayoutOptions::Center).background_color(hex(IDLE)),
+            SkiaShape::new().corner_radius(5).width_request(10).height_request(10).vertical_options(LayoutOptions::Center).background_color(hex(pal().muted)),
             SkiaStack::new().margin((22, 0, 84, 0)).spacing(2).children((
-                label(&name, 15).text_color(hex(0x9CA3AF)),
-                label("", 12).text_color(hex(0x6B7280)).max_lines(2).observe(move |me, app: &App| {
+                label(&name, 15).text_color(hex(pal().text_soft)),
+                label("", 12).text_color(hex(pal().muted)).max_lines(2).observe(move |me, app: &App| {
                     let cwd = app.inactive(&folder).map_or("", |s| s.cwd.as_str());
                     me.set_is_visible(!cwd.is_empty());
                     me.set_text(cwd.to_string());
                 }),
             )),
             label("", 12)
-                .text_color(hex(0x6B7280))
+                .text_color(hex(pal().muted))
                 .horizontal_options(LayoutOptions::End)
                 .vertical_options(LayoutOptions::Center)
                 .observe(move |me, app: &App| {
@@ -1255,6 +1554,11 @@ fn sync(app: &mut App, cx: &mut Cx) {
         app.unseen = st.unseen.clone();
         app.update = st.update.clone();
         app.install = st.install.clone();
+        app.theme = st.theme.clone();
+        app.language = st.language.clone();
+        app.detect_questions = st.detect_questions;
+        app.check_updates = st.check_updates;
+        app.reopen_home_in = st.reopen_home_in.clone();
         app.pins = st.pins.clone();
         let read = st.answers.clone();
         app.skipped_update = st.skipped_update.clone();
@@ -1326,6 +1630,7 @@ pub fn run() {
     let _ = STARTED.set((shared, tx));
     drawnui::run_sized(TITLE, 380.0, 640.0, || {
         let (shared, tx) = STARTED.get().unwrap().clone();
+        theme::set(&shared.lock().unwrap().theme);
         let app = App {
             shared,
             tx,
@@ -1343,6 +1648,15 @@ pub fn run() {
             tints: HashMap::new(),
             unseen: Default::default(),
             hovered: None,
+            page: Page::Main,
+            topmost: false,
+            theme: String::new(),
+            language: String::new(),
+            detect_questions: true,
+            check_updates: true,
+            reopen_home_in: String::new(),
+            start_at_login: false,
+            settings_note: String::new(),
             pins: Vec::new(),
             answers: None,
             answers_list: Handle::default(),
@@ -1359,14 +1673,18 @@ pub fn run() {
         Box::new(
             ui(app)
                 .font_bytes("Default", include_bytes!("../assets/OpenSans-Regular.ttf"))
-                .background(hex(0x12141C))
+                .background(hex(pal().bg))
                 .on_key_down(|app: &mut App, event, cx| {
-                    if app.answers.is_none() || event.key != "Escape" {
-                        return false;
+                    match &*event.key {
+                        "Escape" if app.answers.is_some() => go_back(app, cx),
+                        "Escape" if app.page != Page::Main => app.page = Page::Main,
+                        "Comma" if event.keyboard.is_control_pressed() => open_settings(app, cx),
+                        "F1" => open_help(app, cx),
+                        _ => return false,
                     }
-                    go_back(app, cx);
                     true
                 })
+                .tooltips_from_accessibility(true)
                 .on_canvas_resized(|app, size, cx| {
                     app.size = size;
                     if !std::mem::replace(&mut app.ticking, true) {
@@ -1405,6 +1723,15 @@ mod menu_keys {
             tints: HashMap::new(),
             unseen: Default::default(),
             hovered: None,
+            page: Page::Main,
+            topmost: false,
+            theme: String::new(),
+            language: String::new(),
+            detect_questions: true,
+            check_updates: true,
+            reopen_home_in: String::new(),
+            start_at_login: false,
+            settings_note: String::new(),
             pins: Vec::new(),
             answers: None,
             answers_list: Handle::default(),

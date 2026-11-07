@@ -94,6 +94,43 @@ pub fn clean_after_update() {
     }
 }
 
+/// macOS' appearance is Dark.
+pub fn system_dark() -> bool {
+    Command::new("/usr/bin/defaults").args(["read", "-g", "AppleInterfaceStyle"]).output().is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "Dark")
+}
+
+/// The LaunchAgent that opens the app at login.
+fn login_agent() -> PathBuf {
+    home_dir().join("Library").join("LaunchAgents").join("com.appomobi.agentsignals.plist")
+}
+
+/// macOS opens the app at login (its LaunchAgent is there).
+pub fn starts_at_login() -> bool {
+    login_agent().is_file()
+}
+
+/// Writes or removes the LaunchAgent that opens this app, where it is now, at login: the app
+/// bundle through `open`, a bare program as itself.
+pub fn set_start_at_login(on: bool) -> Result<()> {
+    let agent = login_agent();
+    if !on {
+        let _ = std::fs::remove_file(&agent);
+        return Ok(());
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let bundle = exe.ancestors().nth(3).filter(|b| b.extension().is_some_and(|e| e == "app"));
+    let escape = |p: &Path| p.display().to_string().replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let program = match bundle {
+        Some(bundle) => format!("<string>/usr/bin/open</string><string>-a</string><string>{}</string>", escape(bundle)),
+        None => format!("<string>{}</string>", escape(&exe)),
+    };
+    let plist = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>com.appomobi.agentsignals</string><key>ProgramArguments</key><array>{program}</array><key>RunAtLoad</key><true/></dict></plist>\n"
+    );
+    let _ = std::fs::create_dir_all(agent.parent().unwrap());
+    std::fs::write(&agent, plist).map_err(|e| format!("{} cannot be written: {e}", agent.display()))
+}
+
 /// Opens a web address in the default browser.
 pub fn open_url(url: &str) {
     let _ = Command::new("open").arg(url).spawn();

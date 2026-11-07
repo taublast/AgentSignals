@@ -131,6 +131,14 @@ pub struct State {
     pub skipped_update: String,
     /// "Update and restart" under way, or why it failed.
     pub install: crate::update::Install,
+    /// Settings (settings.json): "system", "dark" or "light"; a language code, empty for the
+    /// system's; detect questions from the transcripts; check GitHub for new versions.
+    pub theme: String,
+    pub language: String,
+    pub detect_questions: bool,
+    pub check_updates: bool,
+    /// Where sessions started in the home folder reopen (sessions.json, kept by the worker).
+    pub reopen_home_in: String,
     /// Answers the user pinned in Answers, kept in pins.json with their text.
     pub pins: Vec<Pin>,
     /// The questions and answers of the session the Answers screen shows (its id), once read.
@@ -156,7 +164,7 @@ impl Pin {
 }
 
 /// settings.json: what the user set in the window that is not a rule.
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct Settings {
     /// Session name to "#RRGGBB".
     #[serde(default)]
@@ -164,6 +172,29 @@ struct Settings {
     /// The release the user chose Later for: its banner stays away until a newer one.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     skipped_update: String,
+    #[serde(default = "dark")]
+    theme: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    language: String,
+    #[serde(default = "yes")]
+    detect_questions: bool,
+    #[serde(default = "yes")]
+    check_updates: bool,
+}
+
+// The look the app had before themes, for settings.json files written before them.
+fn dark() -> String {
+    "dark".into()
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings { tints: Default::default(), skipped_update: String::new(), theme: dark(), language: String::new(), detect_questions: true, check_updates: true }
+    }
 }
 
 /// "#RRGGBB" (or "RRGGBB") to 0xRRGGBB.
@@ -182,7 +213,17 @@ impl State {
         let settings: Settings = std::fs::read(settings_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let tints = settings.tints.iter().filter_map(|(name, c)| Some((name.to_lowercase(), parse_color(c)?))).collect();
         let pins = std::fs::read(pins_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        State { rules, tints, pins, skipped_update: settings.skipped_update, ..State::default() }
+        State {
+            rules,
+            tints,
+            pins,
+            skipped_update: settings.skipped_update,
+            theme: settings.theme,
+            language: settings.language,
+            detect_questions: settings.detect_questions,
+            check_updates: settings.check_updates,
+            ..State::default()
+        }
     }
 
     /// Pins an answer of a session, or unpins it when it was pinned, and saves the pins.
@@ -207,10 +248,20 @@ impl State {
         self.save_settings();
     }
 
+    /// A setting of the Settings screen changed: saved, and the window copies it at its next sync.
+    pub fn settings_changed(&mut self) {
+        self.version += 1;
+        self.save_settings();
+    }
+
     fn save_settings(&self) {
         let settings = Settings {
             tints: self.tints.iter().map(|(n, c)| (n.clone(), color_text(*c))).collect(),
             skipped_update: self.skipped_update.clone(),
+            theme: self.theme.clone(),
+            language: self.language.clone(),
+            detect_questions: self.detect_questions,
+            check_updates: self.check_updates,
         };
         let path = settings_path();
         let _ = std::fs::create_dir_all(path.parent().unwrap());

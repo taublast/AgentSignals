@@ -18,6 +18,8 @@
 //!   download name ends), `download(url, file)`, `install_update(file)` (puts the downloaded
 //!   release in place of the running app and starts it once this process has exited; the caller
 //!   exits next), `clean_after_update()` (removes what the swap left, at the next start).
+//! - Settings: `system_dark()` (the system's light or dark mode), `starts_at_login()`,
+//!   `set_start_at_login(on) -> Result<()>` (this program, where it is now, starts at sign-in).
 //! - `pid_alive(pid)`.
 //! - Folders: `home_dir()` (where `.claude` lives), `data_dir()` (the per-user app data folder;
 //!   the app keeps its files in `AgentSignals` under it), `sound_dirs()` (system sounds),
