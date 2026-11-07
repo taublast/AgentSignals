@@ -1,5 +1,6 @@
 //! What the worker, the HTTP server and the UI share: sessions, rules, notes, the event log.
 
+use crate::i18n::tr;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -415,9 +416,9 @@ impl Signal {
 
     fn set(self, a: &mut Action, on: bool) {
         match self {
-            Signal::Say => a.say = on.then(|| "{name} finished".into()),
+            Signal::Say => a.say = on.then(|| tr("{name} finished").into()),
             Signal::Sound => a.sound = on.then(|| crate::platform::FINISHED_SOUND.into()),
-            Signal::Toast => a.toast = on.then(|| "{name} finished".into()),
+            Signal::Toast => a.toast = on.then(|| tr("{name} finished").into()),
             Signal::Flash => a.flash = on,
         }
     }
@@ -425,10 +426,10 @@ impl Signal {
     /// Menu text to turn it on, to turn it off, and its name for screen readers.
     pub fn labels(self) -> (&'static str, &'static str, &'static str) {
         match self {
-            Signal::Say => ("🔊 Announce when finished", "🔇 Stop announcing", "Announce when finished"),
-            Signal::Sound => ("🔔 Play a sound when finished", "🔕 Stop the sound", "Play a sound when finished"),
-            Signal::Toast => ("💬 Notify when finished", "💬 Stop notifying", "Notify when finished"),
-            Signal::Flash => ("⚡ Flash taskbar when finished", "⚡ Stop flashing", "Flash taskbar when finished"),
+            Signal::Say => (tr("🔊 Announce when finished"), tr("🔇 Stop announcing"), tr("Announce when finished")),
+            Signal::Sound => (tr("🔔 Play a sound when finished"), tr("🔕 Stop the sound"), tr("Play a sound when finished")),
+            Signal::Toast => (tr("💬 Notify when finished"), tr("💬 Stop notifying"), tr("Notify when finished")),
+            Signal::Flash => (tr("⚡ Flash taskbar when finished"), tr("⚡ Stop flashing"), tr("Flash taskbar when finished")),
         }
     }
 }
@@ -500,10 +501,12 @@ pub fn expand(text: &str, name: &str, waiting: &str) -> String {
 }
 
 /// "4m", "2h", "35s".
+/// A duration in the largest whole unit; under a minute "<1m", so a row's time changes once a
+/// minute, not every second.
 pub fn age(ms: u64) -> String {
     let s = ms / 1000;
     match s {
-        0..60 => format!("{s}s"),
+        0..60 => "<1m".to_string(),
         60..3600 => format!("{}m", s / 60),
         3600..86400 => format!("{}h", s / 3600),
         _ => format!("{}d", s / 86400),

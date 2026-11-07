@@ -22,6 +22,8 @@ through tabs to find out.
 - **Updates itself**: when a newer release is out, **Update and restart** downloads it, puts it in
   place of the app and reopens it, with your settings kept; Later hides it until the next one. The
   version you run is at the bottom of the list.
+- **In your language**: English, Deutsch, Español, Français, Italiano, Português, Srpski and
+  Русский, or the system's language. Dark, light or system theme.
 
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
 Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
@@ -30,16 +32,27 @@ Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://git
 
 ## The window
 
-**Top bar**
+**Top bar**: a field that filters the sessions by name, title, remote id or note, and the
+**Settings** and **Help** buttons.
 
-- **On top**: keeps the window above all other windows, so it stays visible while you work in the
-  terminals.
-- **Mute**: silences every signal until you switch it off, for example during a call. Status
+**Status bar**: how many sessions are waiting for you, asked you something, are working, idle and
+closed. While signals are muted it shows **Muted**; a click turns them back on.
+
+**Settings**
+
+- **Appearance**: theme (System, Dark, Light) and language (System or one of the eight).
+- **Signals**: **Mute all signals** silences every signal, for example during a call. Status
   changes are still listed under Recent.
-- **Counts**: how many sessions are waiting for you, asked you something, are working, and idle.
+- **Sessions**: **Detect questions** turns the blue "asked you something" status on or off; the
+  folder that sessions started in your home folder reopen in.
+- **App**: **Keep window on top**, **Start with Windows** (on macOS **Open at login**), **Check for
+  updates**.
 
-**After a reboot** the list starts with "20 sessions from last time are closed" and their names.
-**Reopen 20 sessions from last time** reopens each one with `claude --resume`: its conversation,
+**Help** explains the colors, the clicks and the keys, and ends with the version and links to the
+repository and its issues.
+
+**After a reboot** the list starts with "Sessions from last time that are closed: 20" and their names.
+**Reopen sessions from last time (20)** reopens each one with `claude --resume`: its conversation,
 its start folder, its permission mode and its name, a few seconds apart. On Windows they come back
 in Windows Terminal, grouped into windows and tabs as they were; on macOS each in a Terminal window
 of its own. **Not now** hides the offer; they stay in the list as closed sessions. A reopened session waits for you;
@@ -215,15 +228,13 @@ Everything that differs per operating system is in `src/platform/`, one file per
 list, rules, signals logic, the API and the session memory are shared and never call the system
 directly.
 
-### Start with Windows (optional)
+The texts are written in English in the code (`tr("...")`); `i18n/<language>.json` maps each one to
+its translation, and a text a language lacks shows in English.
 
-The app then starts when you sign in, so after a reboot it offers your sessions from last time
-right away. From the repository folder:
+### Start with Windows
 
-```powershell
-$lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Agent Signals.lnk")
-$lnk.TargetPath = "$PWD\target\release\agentsignals.exe"; $lnk.WorkingDirectory = "$PWD\target\release"; $lnk.Save()
-```
+Settings > App > **Start with Windows** (on macOS **Open at login**): the app then starts when you
+sign in, so after a reboot it offers your sessions from last time right away.
 
 ## macOS
 
@@ -340,7 +351,7 @@ Localhost only, no authentication: any local process can make it beep.
 - Reads `~/.claude/sessions/*.json` (Claude Code's list of live sessions) and, from
   each session's transcript, its first lines (start folder), its last lines (permission mode) and,
   for a session without a name of its own, its title.
-- Writes `rules.json`, `settings.json` (row tints, the version you chose Later for), `pins.json` (pinned answers, with their text), `sessions.json` (the terminal sessions; closed ones stay until you remove
+- Writes `rules.json`, `settings.json` (row tints, theme, language, the Settings switches, the version you chose Later for), `pins.json` (pinned answers, with their text), `sessions.json` (the terminal sessions; closed ones stay until you remove
   them) and, after a crash, `crash.log` in its folder (`%APPDATA%\AgentSignals` on Windows,
   `~/Library/Application Support/AgentSignals` on macOS). On Windows it registers the notification
   AUMID under `HKCU\Software\Classes\AppUserModelId\AgentSignals`.

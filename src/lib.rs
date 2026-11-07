@@ -3,6 +3,7 @@
 
 mod answers;
 mod http;
+mod i18n;
 mod icons;
 mod restore;
 mod platform;
@@ -13,6 +14,7 @@ mod update;
 mod worker;
 
 use drawnui::prelude::*;
+use i18n::{tr, trf};
 use theme::pal;
 use restore::Saved;
 use state::{Event, Rule, Session, Shared, Signal, State};
@@ -187,8 +189,8 @@ fn main_page(app: &mut App) -> Build<SkiaLayout> {
         SkiaGrid::new().row(0).fill_x().column_definitions("*, Auto").column_spacing(8).padding((12, 12, 10, 8)).children((
             filter_field(app),
             SkiaRow::new().column(1).spacing(2).vertical_options(LayoutOptions::Center).accessibility_role(Aria::TOOLBAR).children((
-                icon_button(icons::SETTINGS, "Settings", "Opens the settings", open_settings),
-                icon_button(icons::CIRCLE_QUESTION_MARK, "Help", "Opens the help", open_help),
+                icon_button(icons::SETTINGS, tr("Settings"), tr("Opens the settings"), open_settings),
+                icon_button(icons::CIRCLE_QUESTION_MARK, tr("Help"), tr("Opens the help"), open_help),
             )),
         )),
         status_bar().row(2),
@@ -204,23 +206,23 @@ fn main_page(app: &mut App) -> Build<SkiaLayout> {
                 reopen_banner(),
                 update_banner(),
                 // One Tab stop: the arrow keys move between the rows.
-                SkiaStack::new().spacing(6).accessibility_role(Aria::LIST).accessibility_label("Sessions").assign(&mut app.session_stack),
+                SkiaStack::new().spacing(6).accessibility_role(Aria::LIST).accessibility_label(tr("Sessions")).assign(&mut app.session_stack),
                 label("", 13).text_color(hex(pal().text_soft)).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
                     let none = !app.filter.trim().is_empty() && !app.sessions.iter().any(|s| shows(app, s)) && !app.inactive.iter().any(|s| shows_closed(app, s));
                     me.set_is_visible(none);
-                    me.set_text("No session matches.");
+                    me.set_text(tr("No session matches."));
                 }),
-                section("Recent"),
+                section(tr("Recent")),
                 label("", 12).text_color(hex(pal().text_soft)).accessibility_role(Aria::TEXT).observe(|me, app: &App| me.set_text(recent(app))),
                 // Which build this is, at the very bottom of the list.
-                label(concat!("Version ", env!("CARGO_PKG_VERSION")), 12).text_color(hex(pal().muted)).margin((4, 8, 0, 0)).accessibility_role(Aria::TEXT),
+                label(&trf("Version {version}", &[("version", env!("CARGO_PKG_VERSION"))]), 12).text_color(hex(pal().muted)).margin((4, 8, 0, 0)).accessibility_role(Aria::TEXT),
             ))),
     ))
 }
 
 /// The list's filter: a search icon, then the text, in the dark field of the app's search boxes.
 fn filter_field(app: &mut App) -> Build<SkiaShape> {
-    search_field("Filter sessions", &mut app.filter_editor, |app| app.filter.clone(), |app, _cx, text| app.filter = text.to_string())
+    search_field(tr("Filter sessions"), &mut app.filter_editor, |app| app.filter.clone(), |app, _cx, text| app.filter = text.to_string())
 }
 
 /// The app's search box: a search icon, the text, and a small X that clears it while it holds text,
@@ -265,8 +267,8 @@ fn search_field(placeholder: &'static str, editor: &mut Handle<SkiaEditor>, valu
                 .height_request(20)
                 .vertical_options(LayoutOptions::Center)
                 .accessibility_role(Aria::BUTTON)
-                .accessibility_label("Clear")
-                .tooltip("Clear")
+                .accessibility_label(tr("Clear"))
+                .tooltip(tr("Clear"))
                 .observe(move |me, app: &App| me.set_is_visible(!value(app).is_empty()))
                 .on_hovered(|me, _app: &mut App, _cx, on| me.set_background_color(if on { hex(mix(pal().row, pal().hover_toward, pal().hover_control)) } else { Color::TRANSPARENT }))
                 .on_tapped(move |_me, app: &mut App, cx| {
@@ -318,7 +320,7 @@ fn status_bar() -> Build<SkiaLayout> {
                 .vertical_options(LayoutOptions::Center)
                 .background_color(color.map_or(Color::TRANSPARENT, hex))
                 .is_visible(color.is_some()),
-            label("", 12).text_color(hex(pal().text_soft)).vertical_options(LayoutOptions::Center).observe(move |me, app: &App| me.set_text(format!("{} {word}", n(app)))),
+            label("", 12).text_color(hex(pal().text_soft)).vertical_options(LayoutOptions::Center).observe(move |me, app: &App| me.set_text(trf("{count} {word}", &[("count", &n(app).to_string()), ("word", word)]))),
         ))
     };
     // A line on top keeps it apart from the list in both themes.
@@ -336,11 +338,11 @@ fn status_bar() -> Build<SkiaLayout> {
                 .accessibility_role(Aria::STATUS)
                 .observe(|me, app: &App| {
                     let n = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
-                    let parts = [(n("waiting"), "waiting"), (n("question"), "asked"), (n("busy"), "working"), (n("idle"), "idle"), (app.inactive.len(), "closed")];
-                    let text: Vec<String> = parts.iter().filter(|(n, _)| *n > 0).map(|(n, w)| format!("{n} {w}")).collect();
-                    me.set_accessibility_label(if text.is_empty() { "No sessions".to_string() } else { text.join(", ") });
+                    let parts = [(n("waiting"), tr("waiting")), (n("question"), tr("asked")), (n("busy"), tr("working")), (n("idle"), tr("idle")), (app.inactive.len(), tr("closed"))];
+                    let text: Vec<String> = parts.iter().filter(|(n, _)| *n > 0).map(|(n, w)| trf("{count} {word}", &[("count", &n.to_string()), ("word", w)])).collect();
+                    me.set_accessibility_label(if text.is_empty() { tr("No sessions").to_string() } else { text.join(", ") });
                 })
-                .children((count("waiting", "waiting"), count("question", "asked"), count("busy", "working"), count("idle", "idle"), count("closed", "closed"))),
+                .children((count("waiting", tr("waiting")), count("question", tr("asked")), count("busy", tr("working")), count("idle", tr("idle")), count("closed", tr("closed")))),
             // While signals are muted the bar says so; a click turns them back on.
             SkiaShape::new()
                 .column(1)
@@ -349,13 +351,13 @@ fn status_bar() -> Build<SkiaLayout> {
                 .background_color(hex(pal().border))
                 .vertical_options(LayoutOptions::Center)
                 .accessibility_role(Aria::BUTTON)
-                .accessibility_label("Signals are muted. Click to turn them back on.")
+                .accessibility_label(tr("Signals are muted. Click to turn them back on."))
                 .observe(|me, app: &App| me.set_is_visible(app.muted))
                 .on_hovered(|me, _app: &mut App, _cx, on| {
                     me.set_background_color(hex(if on { mix(pal().border, pal().hover_toward, pal().hover_control) } else { pal().border }))
                 })
                 .on_tapped(|_me, app: &mut App, _cx| set_muted(app, false))
-                .children((label("🔇 Muted", 12).text_color(hex(pal().text)),)),
+                .children((label(tr("🔇 Muted"), 12).text_color(hex(pal().text)),)),
         )),
     ))
 }
@@ -507,40 +509,53 @@ fn settings_page() -> Build<SkiaShape> {
             rebuild(app, cx);
         })
     };
-    let login = if cfg!(windows) { "Start with Windows" } else { "Open at login" };
+    // A language shows under its own name, so anyone finds theirs whatever the app shows now.
+    let language = |code: &'static str, text: String| {
+        chip(&text, move |app: &App| app.language == code, move |app: &mut App, cx| {
+            app.language = code.to_string();
+            save_settings(app);
+            i18n::set(code);
+            rebuild(app, cx);
+        })
+    };
+    let mut languages = vec![language("", format!("{} ({})", tr("System"), i18n::native_name(i18n::system())))];
+    languages.extend(i18n::LANGUAGES.iter().map(|&(code, name)| language(code, name.to_string())));
+    let login = if cfg!(windows) { tr("Start with Windows") } else { tr("Open at login") };
     screen(
-        "Settings",
+        tr("Settings"),
         SkiaStack::new().spacing(20).children((
             SkiaStack::new().spacing(10).children((
-            heading("Appearance"),
-            label("Theme", 14).text_color(hex(pal().text)),
-            SkiaWrap::new().spacing(8).accessibility_role(Aria::RADIO_GROUP).accessibility_label("Theme").children((
-                theme("system", "System"),
-                theme("dark", "Dark"),
-                theme("light", "Light"),
+            heading(tr("Appearance")),
+            label(tr("Theme"), 14).text_color(hex(pal().text)),
+            SkiaWrap::new().spacing(8).accessibility_role(Aria::RADIO_GROUP).accessibility_label(tr("Theme")).children((
+                theme("system", tr("System")),
+                theme("dark", tr("Dark")),
+                theme("light", tr("Light")),
             )),
+            label(tr("Language"), 14).text_color(hex(pal().text)).margin((0, 6, 0, 0)),
+            SkiaWrap::new().spacing(8).accessibility_role(Aria::RADIO_GROUP).accessibility_label(tr("Language")).children(languages),
             )),
             SkiaStack::new().spacing(10).children((
-            heading("Signals"),
+            heading(tr("Signals")),
             setting_switch(
-                "Mute all signals",
-                "Silences every sound, voice, notification and flash, for example during a call. Status changes still show under Recent.",
+                tr("Mute all signals"),
+                tr("Silences every sound, voice, notification and flash, for example during a call. Status changes still show under Recent."),
                 |app| app.muted,
                 |app, _cx, on| set_muted(app, on),
             ),
             )),
             SkiaStack::new().spacing(10).children((
-            heading("Sessions"),
+            heading(tr("Sessions")),
             setting_switch(
-                "Detect questions",
-                "A session whose last answer asks you something turns blue, with the question on its row.",
+                tr("Detect questions"),
+                tr("A session whose last answer asks you something turns blue, with the question on its row."),
                 |app| app.detect_questions,
                 |app, _cx, on| {
                     app.detect_questions = on;
                     save_settings(app);
                 },
             ),
-            label("Reopen home-folder sessions in", 14).text_color(hex(pal().text)),
+            label(tr("Reopen home-folder sessions in"), 14).text_color(hex(pal().text)),
             SkiaEditor::new()
                 .fill_x()
                 .font_size(13)
@@ -551,8 +566,8 @@ fn settings_page() -> Build<SkiaShape> {
                 .stroke_color(hex(pal().border))
                 .stroke_width(1.55)
                 .corner_radius(8)
-                .placeholder_text("Their own folder")
-                .accessibility_label("Reopen home-folder sessions in")
+                .placeholder_text(tr("Their own folder"))
+                .accessibility_label(tr("Reopen home-folder sessions in"))
                 .observe(|me, app: &App| {
                     if !me.is_focused() {
                         me.set_text(app.reopen_home_in.clone());
@@ -565,18 +580,18 @@ fn settings_page() -> Build<SkiaShape> {
                         app.reopen_home_in = folder.clone();
                         let _ = app.tx.send(Cmd::ReopenFolder(folder));
                     } else {
-                        app.settings_note = "No such folder.".into();
+                        app.settings_note = tr("No such folder.").into();
                     }
                 }),
-            label("Claude Code asks to trust the home folder every time; a folder you trusted once does not. Empty: each session reopens in its own folder.", 12).text_color(hex(pal().text_soft)),
+            label(tr("Claude Code asks to trust the home folder every time; a folder you trusted once does not. Empty: each session reopens in its own folder."), 12).text_color(hex(pal().text_soft)),
             )),
             SkiaStack::new().spacing(10).children((
-            heading("App"),
-            setting_switch("Keep window on top", "Agent Signals stays above other windows.", |app| app.topmost, |app, _cx, on| {
+            heading(tr("App")),
+            setting_switch(tr("Keep window on top"), tr("Agent Signals stays above other windows."), |app| app.topmost, |app, _cx, on| {
                 app.topmost = on;
                 let _ = app.tx.send(Cmd::Topmost(on));
             }),
-            setting_switch(login, "Agent Signals starts when you sign in, from where it is now.", |app| app.start_at_login, |app, _cx, on| {
+            setting_switch(login, tr("Agent Signals starts when you sign in, from where it is now."), |app| app.start_at_login, |app, _cx, on| {
                 match platform::set_start_at_login(on) {
                     Ok(()) => {
                         app.start_at_login = on;
@@ -586,8 +601,8 @@ fn settings_page() -> Build<SkiaShape> {
                 }
             }),
             setting_switch(
-                "Check for updates",
-                "Asks GitHub for a newer version at start and once a day.",
+                tr("Check for updates"),
+                tr("Asks GitHub for a newer version at start and once a day."),
                 |app| app.check_updates,
                 |app, _cx, on| {
                     app.check_updates = on;
@@ -600,7 +615,7 @@ fn settings_page() -> Build<SkiaShape> {
             }),
             )),
             SkiaStack::new().spacing(10).children((
-            heading("About"),
+            heading(tr("About")),
             label(concat!("Agent Signals ", env!("CARGO_PKG_VERSION")), 14).text_color(hex(pal().text)).accessibility_role(Aria::TEXT),
             tool_button(|_| ("↗", "github.com/taublast/AgentSignals")).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals")),
             )),
@@ -636,43 +651,43 @@ fn dot_line(color: u32, text: &str) -> Build<SkiaLayout> {
 fn help_page() -> Build<SkiaShape> {
     let text = |t: &str| label(t, 13).text_color(hex(pal().text_body)).accessibility_role(Aria::TEXT);
     screen(
-        "Help",
+        tr("Help"),
         SkiaStack::new().spacing(16).children((
             SkiaStack::new().spacing(6).children((
-            heading("The rows"),
-            dot_line(pal().waiting, "Claude Code waits for you: a permission dialog or an input prompt."),
-            dot_line(pal().question, "The last answer asked you something; the question is on the row."),
-            dot_line(pal().busy, "The session is working."),
-            dot_line(pal().finished, "It just finished and you have not looked yet."),
-            dot_line(pal().idle, "Idle, or closed."),
+            heading(tr("The rows")),
+            dot_line(pal().waiting, tr("Claude Code waits for you: a permission dialog or an input prompt.")),
+            dot_line(pal().question, tr("The last answer asked you something; the question is on the row.")),
+            dot_line(pal().busy, tr("The session is working.")),
+            dot_line(pal().finished, tr("It just finished and you have not looked yet.")),
+            dot_line(pal().idle, tr("Idle, or closed.")),
             )),
             SkiaStack::new().spacing(6).children((
-            heading("Clicks"),
-            text("Click a row to bring its terminal tab, or its VS Code window, to the front. Click a closed row to reopen it."),
-            text("Right-click a row (or the Menu key) for its menu: copy its name, its Answers, signals for when it finishes, a tint, closing it."),
+            heading(tr("Clicks")),
+            text(tr("Click a row to bring its terminal tab, or its VS Code window, to the front. Click a closed row to reopen it.")),
+            text(tr("Right-click a row (or the Menu key) for its menu: copy its name, its Answers, signals for when it finishes, a tint, closing it.")),
             )),
             SkiaStack::new().spacing(6).children((
-            heading("Answers"),
-            text("Every question you asked in a session with Claude's answer, newest first. Search them, open one to read or copy it, pin the ones that matter so they stay on top. Right-click an answer to open, pin or copy it."),
+            heading(tr("Answers")),
+            text(tr("Every question you asked in a session with Claude's answer, newest first. Search them, open one to read or copy it, pin the ones that matter so they stay on top. Right-click an answer to open, pin or copy it.")),
             )),
             SkiaStack::new().spacing(6).children((
-            heading("Keys"),
-            text("Tab and the arrow keys move through the list, Enter clicks, Escape goes back. Ctrl+, opens Settings, F1 this help."),
+            heading(tr("Keys")),
+            text(tr("Tab and the arrow keys move through the list, Enter clicks, Escape goes back. Ctrl+, opens Settings, F1 this help.")),
             )),
             SkiaStack::new().spacing(6).children((
-            heading("For agents"),
-            text("Claude agents set up signals through the app's local API at http://127.0.0.1:47801; open it in a browser for the list of calls."),
+            heading(tr("For agents")),
+            text(tr("Claude agents set up signals through the app's local API at http://127.0.0.1:47801; open it in a browser for the list of calls.")),
             )),
             SkiaStack::new().spacing(6).children((
-            heading("About"),
-            text(concat!("Agent Signals ", env!("CARGO_PKG_VERSION"), ", free and open source (MIT).")),
+            heading(tr("About")),
+            text(&trf("Agent Signals {version}, free and open source (MIT).", &[("version", env!("CARGO_PKG_VERSION"))])),
             SkiaRow::new().spacing(4).children((
-                text("Built with"),
+                text(tr("Built with")).vertical_options(LayoutOptions::Center),
                 tool_button(|_| ("↗", "DrawnUI for Rust")).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/DrawnUi/DrawnUi.Rust")),
             )),
             SkiaRow::new().spacing(8).margin((0, 4, 0, 0)).children((
-                pill("GitHub").on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals")),
-                pill("Report an issue").on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals/issues/new")),
+                pill(tr("GitHub")).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals")),
+                pill(tr("Report an issue")).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals/issues/new")),
             )),
             )),
         )),
@@ -717,24 +732,24 @@ fn reopen_banner() -> Build<SkiaShape> {
         .fill_x()
         .observe(|me, app: &App| me.set_is_visible(!app.reopen.is_empty()))
         .accessibility_role(Aria::REGION)
-        .accessibility_label("Sessions from last time")
+        .accessibility_label(tr("Sessions from last time"))
         .children(SkiaStack::new().spacing(8).children((
             label("", 14).text_color(hex(pal().text)).accessibility_role(Aria::TEXT).accessibility_live(Aria::LIVE_POLITE).observe(|me, app: &App| {
                 let n = app.reopen.len();
-                me.set_text(format!("{n} session{} from last time {} closed", if n == 1 { "" } else { "s" }, if n == 1 { "is" } else { "are" }));
+                me.set_text(trf("Sessions from last time that are closed: {count}", &[("count", &n.to_string())]));
             }),
             label("", 12).text_color(hex(pal().text_soft)).max_lines(4).accessibility_role(Aria::TEXT).observe(|me, app: &App| me.set_text(app.reopen.join(", "))),
             SkiaRow::new().spacing(8).children((
                 button("", pal().accent)
-                    .accessibility_label("Reopen sessions from last time")
+                    .accessibility_label(tr("Reopen sessions from last time"))
                     .observe(|me, app: &App| {
                         let n = app.reopen.len();
-                        me.set_text(format!("Reopen {n} session{} from last time", if n == 1 { "" } else { "s" }));
+                        me.set_text(trf("Reopen sessions from last time ({count})", &[("count", &n.to_string())]));
                     })
                     .on_tapped(|_me, app: &mut App, _cx| {
                         let _ = app.tx.send(Cmd::Reopen);
                     }),
-                button("Not now", pal().border).on_tapped(|_me, app: &mut App, _cx| {
+                button(tr("Not now"), pal().border).on_tapped(|_me, app: &mut App, _cx| {
                     let _ = app.tx.send(Cmd::Dismiss);
                 }),
             )),
@@ -752,20 +767,20 @@ fn update_banner() -> Build<SkiaShape> {
         .fill_x()
         .observe(|me, app: &App| me.set_is_visible(offered(app).is_some()))
         .accessibility_role(Aria::REGION)
-        .accessibility_label("Update")
+        .accessibility_label(tr("Update"))
         .children(SkiaStack::new().spacing(8).children((
             label("", 14).text_color(hex(pal().text)).accessibility_role(Aria::TEXT).accessibility_live(Aria::LIVE_POLITE).observe(|me, app: &App| {
                 if let Some(u) = offered(app) {
                     me.set_text(match &app.install {
-                        update::Install::Idle => format!("Agent Signals {} is available", u.version),
-                        update::Install::Downloading => format!("Downloading Agent Signals {}…", u.version),
-                        update::Install::Failed(why) => format!("Agent Signals {} could not be installed: {why}", u.version),
+                        update::Install::Idle => trf("Agent Signals {version} is available", &[("version", &u.version)]),
+                        update::Install::Downloading => trf("Downloading Agent Signals {version}…", &[("version", &u.version)]),
+                        update::Install::Failed(why) => trf("Agent Signals {version} could not be installed: {why}", &[("version", &u.version), ("why", why)]),
                     });
                 }
             }),
             // While it downloads: no buttons. After a failure the browser takes over.
             SkiaRow::new().spacing(8).observe(|me, app: &App| me.set_is_visible(app.install != update::Install::Downloading)).children((
-                button("Update and restart", pal().accent)
+                button(tr("Update and restart"), pal().accent)
                     .observe(|me, app: &App| me.set_is_visible(app.install == update::Install::Idle))
                     .on_tapped(|_me, app: &mut App, _cx| {
                         if let Some(u) = offered(app).cloned() {
@@ -774,14 +789,14 @@ fn update_banner() -> Build<SkiaShape> {
                             update::install(app.shared.clone(), u);
                         }
                     }),
-                button("Download", pal().accent)
+                button(tr("Download"), pal().accent)
                     .observe(|me, app: &App| me.set_is_visible(matches!(app.install, update::Install::Failed(_))))
                     .on_tapped(|_me, app: &mut App, _cx| {
                         if let Some(u) = offered(app) {
                             platform::open_url(&u.url);
                         }
                     }),
-                button("Later", pal().border).on_tapped(move |_me, app: &mut App, _cx| {
+                button(tr("Later"), pal().border).on_tapped(move |_me, app: &mut App, _cx| {
                     if let Some(version) = offered(app).map(|u| u.version.clone()) {
                         // The window's copy too, at once: the banner goes now, not at the next sync.
                         app.skipped_update = version.clone();
@@ -872,7 +887,7 @@ fn answer_cell() -> (Build<SkiaShape>, AnswerCell) {
         // One bitmap per cell, blitted while scrolling; the ripple is drawn over it.
         .use_cache(CacheType::Image)
         .accessibility_role(Aria::BUTTON)
-        .accessibility_hint("Opens the full answer")
+        .accessibility_hint(tr("Opens the full answer"))
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .on_hovered(|me, app: &mut App, _cx, on| {
             let pinned = cell_entry(app, me.base().context_index).is_some_and(|e| pinned(app, e));
@@ -924,8 +939,8 @@ fn bind_answer(cell: &AnswerCell, app: &App, row: usize, cx: &mut Cx) {
         me.set_background_color(cell_color(is_pinned, false));
         // The answer first, as on screen; then the question it answers.
         let when = asked(app, entry);
-        let pin = if is_pinned { "Pinned. " } else { "" };
-        me.set_accessibility_label(if when.is_empty() { format!("{pin}{answer} Question: {question}") } else { format!("{pin}{answer} Asked {when}: {question}") });
+        let pin = if is_pinned { format!("{} ", tr("Pinned.")) } else { String::new() };
+        me.set_accessibility_label(if when.is_empty() { format!("{pin}{answer} {}", trf("Question: {question}", &[("question", &question)])) } else { format!("{pin}{answer} {}", trf("Asked {when}: {question}", &[("when", &when), ("question", &question)])) });
     }
     if let Some(mut me) = cx.get_mut(cell.question) {
         me.set_text(if is_pinned { format!("📌 {question}") } else { question });
@@ -942,7 +957,7 @@ fn bind_answer(cell: &AnswerCell, app: &App, row: usize, cx: &mut Cx) {
 
 /// When a question was asked: "5m ago", empty when the transcript has no time for it.
 fn asked(app: &App, entry: &answers::Answer) -> String {
-    if entry.at_ms == 0 { String::new() } else { format!("{} ago", state::age(app.now.saturating_sub(entry.at_ms))) }
+    if entry.at_ms == 0 { String::new() } else { trf("{age} ago", &[("age", &state::age(app.now.saturating_sub(entry.at_ms)))]) }
 }
 
 /// The open answer, if any.
@@ -962,7 +977,7 @@ fn answers_page(app: &mut App) -> Build<SkiaShape> {
         .padding((12, 10, 12, 12))
         .observe(|me, app: &App| {
             if let Some(view) = &app.answers {
-                me.set_accessibility_label(format!("Answers of {}", view.name));
+                me.set_accessibility_label(trf("Answers of {name}", &[("name", &view.name)]));
             }
         })
         .accessibility_role(Aria::DIALOG)
@@ -971,7 +986,7 @@ fn answers_page(app: &mut App) -> Build<SkiaShape> {
             SkiaGrid::new().fill_x().column_definitions("Auto, *").column_spacing(10).row(0).children((
                 back_button(),
                 SkiaStack::new().column(1).spacing(0).vertical_options(LayoutOptions::Center).children((
-                    label("Answers", 16).text_color(hex(pal().text)).accessibility_role(Aria::HEADING),
+                    label(tr("Answers"), 16).text_color(hex(pal().text)).accessibility_role(Aria::HEADING),
                     label("", 12).text_color(hex(pal().text_soft)).max_lines(1).observe(|me, app: &App| {
                         if let Some(view) = &app.answers {
                             me.set_text(view.name.clone());
@@ -981,7 +996,7 @@ fn answers_page(app: &mut App) -> Build<SkiaShape> {
             )),
             // The list's search, or the open answer's toolbar.
             search_field(
-                "Search questions and answers",
+                tr("Search questions and answers"),
                 &mut app.answers_editor,
                 |app| app.answers.as_ref().map_or(String::new(), |v| v.filter.clone()),
                 |app, cx, text| {
@@ -997,15 +1012,15 @@ fn answers_page(app: &mut App) -> Build<SkiaShape> {
                 .row(1)
                 .spacing(4)
                 .accessibility_role(Aria::TOOLBAR)
-                .accessibility_label("Answer")
+                .accessibility_label(tr("Answer"))
                 .observe(|me, app: &App| me.set_is_visible(opened(app).is_some()))
                 .children((
-                    tool_button(|app| if opened(app).is_some_and(|e| pinned(app, e)) { ("📌", "Unpin") } else { ("📌", "Pin") }).on_tapped(|_me, app: &mut App, cx| {
+                    tool_button(|app| if opened(app).is_some_and(|e| pinned(app, e)) { ("📌", tr("Unpin")) } else { ("📌", tr("Pin")) }).on_tapped(|_me, app: &mut App, cx| {
                         if let Some(index) = app.answers.as_ref().and_then(|v| v.open) {
                             toggle_pin(app, cx, index);
                         }
                     }),
-                    tool_button(|app| if app.answers.as_ref().is_some_and(|v| v.copied) { ("✓", "Copied") } else { ("📋", "Copy") }).on_tapped(|_me, app: &mut App, cx| {
+                    tool_button(|app| if app.answers.as_ref().is_some_and(|v| v.copied) { ("✓", tr("Copied")) } else { ("📋", tr("Copy")) }).on_tapped(|_me, app: &mut App, cx| {
                         if let Some(index) = app.answers.as_ref().and_then(|v| v.open) {
                             copy_answer(app, cx, index);
                             if let Some(view) = &mut app.answers {
@@ -1013,7 +1028,7 @@ fn answers_page(app: &mut App) -> Build<SkiaShape> {
                             }
                         }
                     }),
-                    tool_button(|_| ("↗", "Go to session")).on_tapped(|_me, app: &mut App, cx| {
+                    tool_button(|_| ("↗", tr("Go to session"))).on_tapped(|_me, app: &mut App, cx| {
                         if let Some(view) = app.answers.take() {
                             close_popup(app, cx);
                             cx.go_back(app.shell, true);
@@ -1026,10 +1041,10 @@ fn answers_page(app: &mut App) -> Build<SkiaShape> {
                 label("", 13).text_color(hex(pal().text_soft)).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
                     let Some(view) = &app.answers else { return };
                     let text = match &view.list {
-                        None => "Reading the conversation…".to_string(),
-                        Some(Err(why)) => format!("The conversation could not be read: {why}"),
-                        Some(Ok(list)) if list.is_empty() => "No answers yet.".to_string(),
-                        Some(Ok(list)) if answers::matching(list, &view.filter).is_empty() => "Nothing matches.".to_string(),
+                        None => tr("Reading the conversation…").to_string(),
+                        Some(Err(why)) => trf("The conversation could not be read: {why}", &[("why", &why.to_string())]),
+                        Some(Ok(list)) if list.is_empty() => tr("No answers yet.").to_string(),
+                        Some(Ok(list)) if answers::matching(list, &view.filter).is_empty() => tr("Nothing matches.").to_string(),
                         Some(Ok(_)) => String::new(),
                     };
                     me.set_is_visible(!text.is_empty());
@@ -1048,7 +1063,7 @@ fn answers_page(app: &mut App) -> Build<SkiaShape> {
                             .spacing(6)
                             .padding((0, 0, 10, 0))
                             .accessibility_role(Aria::LIST)
-                            .accessibility_label("Questions and answers")
+                            .accessibility_label(tr("Questions and answers"))
                             .assign(&mut app.answers_list)
                             .items(|app: &App| app.answers.as_ref().map_or(0, |v| v.shown.len()), answer_cell, bind_answer),
                     ),
@@ -1090,11 +1105,11 @@ fn back_button() -> Build<SkiaShape> {
         .stroke_color(hex(pal().border))
         .stroke_width(1.55)
         .accessibility_role(Aria::BUTTON)
-        .accessibility_label("Back")
+        .accessibility_label(tr("Back"))
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .on_hovered(hover_item)
         .on_tapped(|_me, app: &mut App, cx| go_back(app, cx))
-        .children((label("←  Back", 13).text_color(hex(pal().text)),))
+        .children((label(tr("←  Back"), 13).text_color(hex(pal().text)),))
 }
 
 /// Back: from an open answer to the answers, from a screen to the list.
@@ -1178,26 +1193,26 @@ fn answer_menu_panel() -> Build<SkiaShape> {
                 }
             }),
             SkiaShape::new().fill_x().height_request(1).margin((4, 0, 4, 4)).background_color(hex(pal().border)),
-            SkiaStack::new().accessibility_role(Aria::MENU).accessibility_label("Answer").children((
-                menu_item("📖", "Open", |app, _cx| {
+            SkiaStack::new().accessibility_role(Aria::MENU).accessibility_label(tr("Answer")).children((
+                menu_item("📖", tr("Open"), |app, _cx| {
                     if let Some(view) = &mut app.answers {
                         view.open = view.menu.take();
                         view.copied = false;
                     }
                 }),
-                menu_item("📌", "Pin", |app, cx| {
+                menu_item("📌", tr("Pin"), |app, cx| {
                     if let Some(index) = app.answers.as_mut().and_then(|v| v.menu.take()) {
                         toggle_pin(app, cx, index);
                     }
                 })
                 .observe(move |me, app: &App| me.set_is_visible(!is_pinned(app))),
-                menu_item("📌", "Unpin", |app, cx| {
+                menu_item("📌", tr("Unpin"), |app, cx| {
                     if let Some(index) = app.answers.as_mut().and_then(|v| v.menu.take()) {
                         toggle_pin(app, cx, index);
                     }
                 })
                 .observe(move |me, app: &App| me.set_is_visible(is_pinned(app))),
-                menu_item("📋", "Copy", |app, cx| {
+                menu_item("📋", tr("Copy"), |app, cx| {
                     if let Some(index) = app.answers.as_mut().and_then(|v| v.menu.take()) {
                         copy_answer(app, cx, index);
                     }
@@ -1292,7 +1307,7 @@ fn palette_panel() -> Build<SkiaShape> {
                 .accessibility_role(Aria::MENU)
                 .observe(|me, app: &App| {
                     if let Some(m) = &app.menu {
-                        me.set_accessibility_label(format!("Tint of {}", m.name));
+                        me.set_accessibility_label(trf("Tint of {name}", &[("name", &m.name)]));
                     }
                 })
                 .children(TINTS.iter().map(|&(name, color)| swatch(name, color)).collect::<Vec<_>>()),
@@ -1300,6 +1315,21 @@ fn palette_panel() -> Build<SkiaShape> {
 }
 
 /// One color of the palette; a ring marks the session's current tint, a gray one the color under the mouse.
+/// A tint's name in the current language.
+fn tint_name(name: &str) -> &'static str {
+    match name {
+        "Orange" => tr("Orange"),
+        "Amber" => tr("Amber"),
+        "Green" => tr("Green"),
+        "Teal" => tr("Teal"),
+        "Blue" => tr("Blue"),
+        "Purple" => tr("Purple"),
+        "Pink" => tr("Pink"),
+        "Slate" => tr("Slate"),
+        _ => tr("None"),
+    }
+}
+
 fn swatch(name: &'static str, color: Option<u32>) -> Build<SkiaShape> {
     let ring = move |app: &App, hovered: bool| {
         let current = app.menu.as_ref().is_some_and(|m| app.tint(&m.name) == color);
@@ -1318,7 +1348,7 @@ fn swatch(name: &'static str, color: Option<u32>) -> Build<SkiaShape> {
         .background_color(color.map_or(hex(pal().row), hex))
         .stroke_width(2)
         .accessibility_role(Aria::MENU_ITEM_RADIO)
-        .accessibility_label(name)
+        .accessibility_label(tint_name(name))
         .observe(move |me, app: &App| {
             me.set_stroke_color(ring(app, false));
             me.set_accessibility_is_pressed(Some(app.menu.as_ref().is_some_and(|m| app.tint(&m.name) == color)));
@@ -1370,19 +1400,19 @@ fn menu_panel() -> Build<SkiaShape> {
                     me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.closed.is_none() && !m.confirm));
                     menu_name(me, app);
                 }).children((
-                    menu_item("📋", "Copy name", |app, cx| {
+                    menu_item("📋", tr("Copy name"), |app, cx| {
                         if let Some(m) = app.menu.take() {
                             cx.set_clipboard(m.name);
                         }
                     }),
-                    menu_item("💬", "Answers", open_answers),
+                    menu_item("💬", tr("Answers"), open_answers),
                     signal_item(Signal::Say),
                     signal_item(Signal::Sound),
                     signal_item(Signal::Toast),
                     signal_item(Signal::Flash),
-                    menu_item("🎨", "Tint", open_palette),
+                    menu_item("🎨", tr("Tint"), open_palette),
                     // A terminal tab only: a VS Code panel is closed in VS Code.
-                    menu_item("❌", "Close session", |app, _cx| {
+                    menu_item("❌", tr("Close session"), |app, _cx| {
                         if let Some(m) = &mut app.menu {
                             m.confirm = true;
                         }
@@ -1397,19 +1427,19 @@ fn menu_panel() -> Build<SkiaShape> {
                     me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.closed.is_some()));
                     menu_name(me, app);
                 }).children((
-                    menu_item("📋", "Copy name", |app, cx| {
+                    menu_item("📋", tr("Copy name"), |app, cx| {
                         if let Some(m) = app.menu.take() {
                             cx.set_clipboard(m.name);
                         }
                     }),
-                    menu_item("💬", "Answers", open_answers),
-                    menu_item("🔄", "Reopen", |app, _cx| {
+                    menu_item("💬", tr("Answers"), open_answers),
+                    menu_item("🔄", tr("Reopen"), |app, _cx| {
                         if let Some(id) = app.menu.take().and_then(|m| m.closed) {
                             let _ = app.tx.send(Cmd::ReopenOne(id));
                         }
                     }),
-                    menu_item("🎨", "Tint", open_palette),
-                    menu_item("🗑", "Remove", |app, _cx| {
+                    menu_item("🎨", tr("Tint"), open_palette),
+                    menu_item("🗑", tr("Remove"), |app, _cx| {
                         if let Some(id) = app.menu.take().and_then(|m| m.closed) {
                             let _ = app.tx.send(Cmd::Forget(id));
                         }
@@ -1420,21 +1450,21 @@ fn menu_panel() -> Build<SkiaShape> {
                     .spacing(10)
                     .observe(|me, app: &App| me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.confirm)))
                     .accessibility_role(Aria::ALERT_DIALOG)
-                    .accessibility_label("Close session")
+                    .accessibility_label(tr("Close session"))
                     .children((
                         label("", 13).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
                             if let Some(m) = &app.menu {
-                                me.set_text(format!("Close the terminal tab of {}? It stays in the list: click it to reopen.", m.name));
+                                me.set_text(trf("Close the terminal tab of {name}? It stays in the list: click it to reopen.", &[("name", &m.name)]));
                             }
                         }),
                         SkiaRow::new().spacing(8).children((
-                            button("Close tab", pal().danger).width_request(100).on_tapped(|_me, app: &mut App, cx| {
+                            button(tr("Close tab"), pal().danger).width_request(100).on_tapped(|_me, app: &mut App, cx| {
                                 if let Some(m) = app.menu.take() {
                                     let _ = app.tx.send(Cmd::CloseTab(m.name));
                                 }
                                 menu_done(app, cx);
                             }),
-                            button("Cancel", pal().border).width_request(100).on_tapped(|_me, app: &mut App, cx| {
+                            button(tr("Cancel"), pal().border).width_request(100).on_tapped(|_me, app: &mut App, cx| {
                                 app.menu = None;
                                 menu_done(app, cx);
                             }),
@@ -1446,7 +1476,7 @@ fn menu_panel() -> Build<SkiaShape> {
 /// A menu's name for screen readers: whose menu it is.
 fn menu_name(me: &mut Mut<'_, SkiaLayout>, app: &App) {
     if let Some(m) = &app.menu {
-        me.set_accessibility_label(format!("Menu of {}", m.name));
+        me.set_accessibility_label(trf("Menu of {name}", &[("name", &m.name)]));
     }
 }
 
@@ -1546,16 +1576,16 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
             let Some(s) = app.session(pid) else { return };
             me.set_is_visible(shows(app, s));
             let status = match s.status.as_str() {
-                "waiting" if s.waiting_for.is_empty() => "waiting for you".to_string(),
-                "waiting" => format!("waiting for you: {}", s.waiting_for),
-                "question" => format!("asks you: {}", s.waiting_for),
-                "busy" => "working".into(),
-                _ if app.unseen.contains(&s.id) => "finished".into(),
-                _ => "idle".into(),
+                "waiting" if s.waiting_for.is_empty() => tr("waiting for you").to_string(),
+                "waiting" => trf("waiting for you: {what}", &[("what", &s.waiting_for)]),
+                "question" => trf("asks you: {what}", &[("what", &s.waiting_for)]),
+                "busy" => tr("working").into(),
+                _ if app.unseen.contains(&s.id) => tr("finished").into(),
+                _ => tr("idle").into(),
             };
-            let place = if s.vscode { ", in VS Code" } else { "" };
+            let place = if s.vscode { format!(", {}", tr("in VS Code")) } else { String::new() };
             me.set_accessibility_label(format!("{}, {status}{place}", s.name));
-            me.set_accessibility_hint(if s.vscode { "Brings its VS Code window to the front" } else { "Brings its terminal tab to the front" }.to_string());
+            me.set_accessibility_hint(if s.vscode { tr("Brings its VS Code window to the front") } else { tr("Brings its terminal tab to the front") }.to_string());
         })
         .on_hovered(move |me, app: &mut App, _cx, on| {
             app.hovered = on.then(|| format!("p{pid}"));
@@ -1666,8 +1696,8 @@ fn closed_row(id: String, name: String) -> Build<SkiaShape> {
         .padding((12, 10, 12, 10))
         .fill_x()
         .accessibility_role(Aria::BUTTON)
-        .accessibility_label(format!("{name}, closed"))
-        .accessibility_hint("Reopens it in a terminal")
+        .accessibility_label(format!("{name}, {}", tr("closed")))
+        .accessibility_hint(tr("Reopens it in a terminal"))
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .consume_gestures(|_me, app: &mut App, _cx, gesture| {
             app.button = gesture.button;
@@ -1699,23 +1729,35 @@ fn closed_row(id: String, name: String) -> Build<SkiaShape> {
                 .vertical_options(LayoutOptions::Center)
                 .observe(move |me, app: &App| {
                     let at = app.inactive(&id).map_or(0, |s| s.closed_at);
-                    me.set_text(if at == 0 { "closed".to_string() } else { format!("closed {}", state::age(app.now.saturating_sub(at))) });
+                    me.set_text(if at == 0 { tr("closed").to_string() } else { trf("closed {age} ago", &[("age", &state::age(app.now.saturating_sub(at)))]) });
                 }),
         ))
 }
 
+/// An event's kind as the list shows it.
+fn event_word(kind: &str) -> &'static str {
+    match kind {
+        "finished" => tr("finished"),
+        "waiting" => tr("waiting"),
+        "started" => tr("started"),
+        "closed" => tr("closed"),
+        "question" => tr("asked"),
+        _ => tr("signal"),
+    }
+}
+
 fn recent(app: &App) -> String {
     if app.events.is_empty() {
-        return "Nothing yet.".into();
+        return tr("Nothing yet.").into();
     }
     let lines: Vec<String> = app
         .events
         .iter()
         .map(|e| {
             let ago = state::age(app.now.saturating_sub(e.at_ms));
-            let busy = if e.kind == "finished" { format!(" after {}", state::age(e.busy_ms)) } else { String::new() };
+            let busy = if e.kind == "finished" { format!(" {}", trf("after {age}", &[("age", &state::age(e.busy_ms))])) } else { String::new() };
             let fired = if e.fired.is_empty() { String::new() } else { format!(" · {}", e.fired) };
-            format!("{ago} ago  {} {}{busy}{fired}", e.session, e.kind)
+            format!("{}  {} {}{busy}{fired}", trf("{age} ago", &[("age", &ago)]), e.session, event_word(&e.kind))
         })
         .collect();
     lines.join("\n")
@@ -1811,11 +1853,10 @@ pub fn run() {
         // Already running: wave from the running one instead. An older one that cannot be asked to
         // close, or another program on the port: say so, never quit without a word.
         if http::older_running() {
-            platform::error_box("An older version of Agent Signals is still running. Quit it, then open this version again.");
+            platform::error_box(tr("An older version of Agent Signals is still running. Quit it, then open this version again."));
         } else if !http::poke_running() {
-            platform::error_box(&format!(
-                "Agent Signals cannot start: another program uses port {}, which the app needs for its API. Close that program and start Agent Signals again.",
-                http::PORT
+            platform::error_box(&trf("Agent Signals cannot start: another program uses port {port}, which the app needs for its API. Close that program and start Agent Signals again.",
+                &[("port", &http::PORT.to_string())],
             ));
         }
         return;
@@ -1827,7 +1868,7 @@ pub fn run() {
     let _ = STARTED.set((shared, tx));
     drawnui::run_sized(TITLE, 380.0, 640.0, || {
         let (shared, tx) = STARTED.get().unwrap().clone();
-        theme::set(&shared.lock().unwrap().theme);
+        { let st = shared.lock().unwrap(); theme::set(&st.theme); i18n::set(&st.language); }
         let app = App {
             shared,
             tx,
