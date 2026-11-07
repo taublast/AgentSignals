@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn statuses_from_turns() {
         let mut turns = Turns::default();
-        let s = |status: &str| Session { pid: 1, id: "x".into(), name: "x".into(), named: true, interactive: true, vscode: false, title: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms: 5 };
+        let s = |status: &str| Session { pid: 1, id: "x".into(), name: "x".into(), named: true, interactive: true, vscode: false, title: String::new(), remote: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms: 5 };
         let path = std::env::temp_dir().join(format!("agentsignals-test-{}-turn.jsonl", std::process::id()));
         std::fs::write(&path, r#"{"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Ready. Deploy now?"}]}}"#).unwrap();
         let meta = std::fs::metadata(&path).unwrap();

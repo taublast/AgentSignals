@@ -64,8 +64,11 @@ struct App {
     /// The Answers screen while it is open, and the column its entries go in.
     answers: Option<AnswersView>,
     answers_list: Handle<SkiaLayout>,
-    /// The screen over the list: none, Settings or Help (Answers has its own state).
-    page: Page,
+    /// The window's shell, and its route now: "" the list, "answers", "settings", "help".
+    shell: Handle<SkiaShell>,
+    route: String,
+    /// The list's filter: rows whose name, title, remote id or second line hold it.
+    filter: String,
     /// The window on top of others (the header switch; kept across a rebuild).
     topmost: bool,
     /// Copies of the settings, for the Settings screen; `start_at_login` is read from the system.
@@ -108,13 +111,6 @@ struct AnswersView {
     copied: bool,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum Page {
-    Main,
-    Settings,
-    Help,
-}
-
 struct Menu {
     name: String,
     /// A closed session's id: the menu offers Reopen and Remove.
@@ -150,54 +146,121 @@ fn rebuild(app: &mut App, cx: &mut Cx) {
     close_popup(app, cx);
     app.menu = None;
     cx.clear_children(app.root);
+    let keep = app.answers.take();
     let content = content(app);
+    app.answers = keep;
     cx.add_child(app.root, content);
+    // The rows come with the next tick's sync, once the shell has put the new list in the window.
     app.session_key = (Vec::new(), Vec::new());
     app.seen = u64::MAX;
-    sync(app, cx);
-    if app.answers.is_some() {
-        fill_answers(app, cx);
+    let route = std::mem::take(&mut app.route);
+    if !route.is_empty() {
+        cx.go_to(app.shell, &route, false);
     }
 }
 
 fn content(app: &mut App) -> Build<SkiaLayout> {
-    SkiaLayer::new().fill().background_color(hex(pal().bg)).children((
-        SkiaGrid::new().fill().column_definitions("*").row_definitions("Auto, *, Auto").row_spacing(0).children((
-            // Header: Settings and Help at its right end. The title is on the window frame.
-            SkiaRow::new()
-                .row(0)
-                .spacing(2)
-                .margin((0, 14, 10, 10))
-                .horizontal_options(LayoutOptions::End)
-                .accessibility_role(Aria::TOOLBAR)
-                .children((
-                    icon_button(icons::SETTINGS, "Settings", "Opens the settings", open_settings),
-                    icon_button(icons::CIRCLE_QUESTION_MARK, "Help", "Opens the help", open_help),
-                )),
-            status_bar().row(2),
-            SkiaScroll::new()
-                .fill()
-                .row(1)
-                // A vertical bar that stays visible, in the 12 pt right padding of the rows.
-                .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
-                .scroll_bar_thumb_color(hex(pal().scroll_thumb))
-                .scroll_bar_track_color(Color::new(pal().scroll_track))
-                .keep_scroll_bars_visible(true)
-                .content(SkiaStack::new().padding((12, 0, 12, 16)).spacing(8).children((
+    SkiaLayer::new().fill().background_color(hex(pal().bg)).children((SkiaShell::new()
+        .fill()
+        .assign(&mut app.shell)
+        // Each screen has its own header with Back: no bar of the shell's.
+        .nav_bar_height(0.0)
+        .page_background_color(hex(pal().bg))
+        .use_browser_history(false)
+        .on_route_changed(|_me, app: &mut App, _cx, route| {
+            app.route = route.to_string();
+            if route != "answers" {
+                app.answers = None;
+            }
+        })
+        .root(main_page(app))
+        .route("answers", |app: &mut App, _: &ShellArguments| answers_page(app))
+        .route("settings", |_app: &mut App, _: &ShellArguments| settings_page())
+        .route("help", |_app: &mut App, _: &ShellArguments| help_page()),))
+}
+
+/// The list: the filter and the header icons, the sessions, the status bar.
+fn main_page(app: &mut App) -> Build<SkiaLayout> {
+    SkiaGrid::new().fill().column_definitions("*").row_definitions("Auto, *, Auto").row_spacing(0).children((
+        SkiaGrid::new().row(0).fill_x().column_definitions("*, Auto").column_spacing(8).padding((12, 12, 10, 8)).children((
+            filter_field(),
+            SkiaRow::new().column(1).spacing(2).vertical_options(LayoutOptions::Center).accessibility_role(Aria::TOOLBAR).children((
+                icon_button(icons::SETTINGS, "Settings", "Opens the settings", open_settings),
+                icon_button(icons::CIRCLE_QUESTION_MARK, "Help", "Opens the help", open_help),
+            )),
+        )),
+        status_bar().row(2),
+        SkiaScroll::new()
+            .fill()
+            .row(1)
+            // A vertical bar that stays visible, in the 12 pt right padding of the rows.
+            .scroll_bar(SkiaScrollBar::new().is_draggable(true).thickness(6))
+            .scroll_bar_thumb_color(hex(pal().scroll_thumb))
+            .scroll_bar_track_color(Color::new(pal().scroll_track))
+            .keep_scroll_bars_visible(true)
+            .content(SkiaStack::new().padding((12, 0, 12, 16)).spacing(8).children((
                 reopen_banner(),
                 update_banner(),
                 // One Tab stop: the arrow keys move between the rows.
                 SkiaStack::new().spacing(6).accessibility_role(Aria::LIST).accessibility_label("Sessions").assign(&mut app.session_stack),
+                label("", 13).text_color(hex(pal().text_soft)).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
+                    let none = !app.filter.trim().is_empty() && !app.sessions.iter().any(|s| shows(app, s)) && !app.inactive.iter().any(|s| shows_closed(app, s));
+                    me.set_is_visible(none);
+                    me.set_text("No session matches.");
+                }),
                 section("Recent"),
                 label("", 12).text_color(hex(pal().text_soft)).accessibility_role(Aria::TEXT).observe(|me, app: &App| me.set_text(recent(app))),
                 // Which build this is, at the very bottom of the list.
                 label(concat!("Version ", env!("CARGO_PKG_VERSION")), 12).text_color(hex(pal().muted)).margin((4, 8, 0, 0)).accessibility_role(Aria::TEXT),
             ))),
-        )),
-        answers_panel(app),
-        settings_panel(),
-        help_panel(),
     ))
+}
+
+/// The list's filter: a search icon, then the text, in the dark field of the app's search boxes.
+fn filter_field() -> Build<SkiaShape> {
+    SkiaShape::new()
+        .fill_x()
+        .corner_radius(8)
+        .background_color(hex(pal().row))
+        .stroke_color(hex(pal().border))
+        .stroke_width(1.55)
+        .padding((10, 0, 6, 0))
+        .children((SkiaGrid::new().fill_x().column_definitions("Auto, *").column_spacing(6).children((
+            SkiaSvg::from_string(icons::SEARCH).width_request(14).height_request(14).tint_color(hex(pal().muted)).vertical_options(LayoutOptions::Center).input_transparent(true),
+            SkiaEditor::new()
+                .column(1)
+                .fill_x()
+                .font_size(13)
+                .background_color(Color::TRANSPARENT)
+                .stroke_width(0.0)
+                .text_color(hex(pal().text))
+                .placeholder_color(hex(pal().muted))
+                .cursor_color(hex(pal().accent))
+                .placeholder_text("Filter sessions")
+                .accessibility_label("Filter sessions")
+                .observe(|me, app: &App| {
+                    if !me.is_focused() {
+                        me.set_text(app.filter.clone());
+                    }
+                })
+                .on_text_changed(|_me, app: &mut App, _cx, text| app.filter = text.to_string()),
+        )),))
+}
+
+/// The filter's words, each in the session's name, title, remote id or second line (note, what
+/// it waits for or asked, folder); never in the chat.
+fn shows(app: &App, s: &Session) -> bool {
+    let note = app.notes.get(&s.name.to_lowercase()).map_or("", String::as_str);
+    matches_filter(&app.filter, &[&s.name, &s.title, &s.remote, &s.waiting_for, note, &s.cwd])
+}
+
+fn shows_closed(app: &App, s: &Saved) -> bool {
+    matches_filter(&app.filter, &[&s.label, &s.cwd, &s.id])
+}
+
+fn matches_filter(filter: &str, fields: &[&str]) -> bool {
+    let fields: Vec<String> = fields.iter().map(|f| f.to_lowercase()).collect();
+    filter.split_whitespace().map(str::to_lowercase).all(|w| fields.iter().any(|f| f.contains(&w)))
 }
 
 /// The bottom line: how many sessions wait, asked, work, rest, are closed, each with its dot (none
@@ -268,6 +331,8 @@ fn status_bar() -> Build<SkiaLayout> {
 /// A header icon: a 28 pt square, the icon in the quiet text color, a veil under the mouse. The
 /// name shows as its tooltip and is what screen readers read; the hint says what it opens.
 fn icon_button(svg: &'static str, name: &str, hint: &str, tap: fn(&mut App, &mut Cx)) -> Build<SkiaShape> {
+    let mut icon = Handle::<SkiaSvg>::default();
+    let picture = SkiaSvg::from_string(svg).width_request(16).height_request(16).tint_color(hex(pal().text_soft)).horizontal_options(LayoutOptions::Center).vertical_options(LayoutOptions::Center).assign(&mut icon);
     SkiaShape::new()
         .corner_radius(6)
         .width_request(28)
@@ -278,34 +343,45 @@ fn icon_button(svg: &'static str, name: &str, hint: &str, tap: fn(&mut App, &mut
         .accessibility_hint(hint)
         // Only the icons have a tooltip: they show no text of their own.
         .tooltip(name)
-        .on_hovered(|me, _app: &mut App, _cx, on| {
+        // Under the mouse the square lights up and the icon takes the bright text color.
+        .on_hovered(move |me, _app: &mut App, cx, on| {
             me.set_background_color(if on { hex(mix(pal().bg, pal().hover_toward, pal().hover_control)) } else { Color::TRANSPARENT });
+            if let Some(mut icon) = cx.get_mut(icon) {
+                icon.set_tint_color(hex(if on { pal().text } else { pal().text_soft }));
+            }
         })
         .on_tapped(move |_me, app: &mut App, cx| tap(app, cx))
-        .children((SkiaSvg::from_string(svg).width_request(16).height_request(16).tint_color(hex(pal().text_soft)).horizontal_options(LayoutOptions::Center).vertical_options(LayoutOptions::Center),))
+        .children((picture,))
 }
 
 fn open_settings(app: &mut App, cx: &mut Cx) {
-    close_popup(app, cx);
-    app.answers = None;
     app.start_at_login = platform::starts_at_login();
     app.settings_note.clear();
-    app.page = Page::Settings;
+    open_screen(app, cx, "settings");
 }
 
 fn open_help(app: &mut App, cx: &mut Cx) {
-    close_popup(app, cx);
-    app.answers = None;
-    app.page = Page::Help;
+    open_screen(app, cx, "help");
 }
 
-/// A screen over the list (Settings, Help): Back and a title, then its content scrolling.
-fn screen(page: Page, title: &str, body: Build<SkiaLayout>) -> Build<SkiaShape> {
+/// Slides a screen in over the list; from another screen, back to the list first.
+fn open_screen(app: &mut App, cx: &mut Cx, route: &str) {
+    close_popup(app, cx);
+    if app.route == route {
+        return;
+    }
+    if !app.route.is_empty() {
+        cx.pop_to_root(app.shell);
+    }
+    cx.go_to(app.shell, route, true);
+}
+
+/// A screen of the shell (Settings, Help): Back and a title, then its content scrolling.
+fn screen(title: &str, body: Build<SkiaLayout>) -> Build<SkiaShape> {
     SkiaShape::new()
         .fill()
         .background_color(hex(pal().bg))
         .padding((12, 10, 12, 12))
-        .observe(move |me, app: &App| me.set_is_visible(app.page == page))
         .accessibility_role(Aria::DIALOG)
         .accessibility_label(title)
         .children(SkiaGrid::new().fill().column_definitions("*").row_definitions("Auto, *").row_spacing(12).children((
@@ -390,7 +466,7 @@ fn save_settings(app: &App) {
 
 /// Settings: Appearance (theme), Sessions (questions, reopen folder), App (start at login, updates),
 /// About.
-fn settings_panel() -> Build<SkiaShape> {
+fn settings_page() -> Build<SkiaShape> {
     let theme = |name: &'static str, text: &'static str| {
         chip(text, move |app: &App| app.theme == name, move |app: &mut App, cx| {
             app.theme = name.to_string();
@@ -401,7 +477,6 @@ fn settings_panel() -> Build<SkiaShape> {
     };
     let login = if cfg!(windows) { "Start with Windows" } else { "Open at login" };
     screen(
-        Page::Settings,
         "Settings",
         SkiaStack::new().spacing(20).children((
             SkiaStack::new().spacing(10).children((
@@ -501,21 +576,20 @@ fn settings_panel() -> Build<SkiaShape> {
     )
 }
 
-/// A small link button: the accent fill for the main one, an outline for the other; lighter under
-/// the mouse.
-fn pill(text: &str, main: bool) -> Build<SkiaShape> {
-    let fill = if main { pal().accent } else { pal().bg };
+/// A small link button, outlined; lighter under the mouse.
+fn pill(text: &str) -> Build<SkiaShape> {
+    let fill = pal().bg;
     SkiaShape::new()
         .corner_radius(6)
         .padding((12, 4, 12, 4))
         .background_color(hex(fill))
-        .stroke_color(hex(if main { pal().accent } else { pal().border }))
+        .stroke_color(hex(pal().border))
         .stroke_width(1.55)
         .accessibility_role(Aria::BUTTON)
         .accessibility_label(text)
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .on_hovered(move |me, _app: &mut App, _cx, on| me.set_background_color(hex(if on { mix(fill, pal().hover_toward, pal().hover_control) } else { fill })))
-        .children((label(text, 13).text_color(if main { Color::WHITE } else { hex(pal().text) }),))
+        .children((label(text, 13).text_color(hex(pal().text)),))
 }
 
 /// A line of Help's color list: the status dot as on a row, then what it means.
@@ -527,10 +601,9 @@ fn dot_line(color: u32, text: &str) -> Build<SkiaLayout> {
 }
 
 /// Help: what the colors mean, what clicks and keys do, and where agents talk to the app.
-fn help_panel() -> Build<SkiaShape> {
+fn help_page() -> Build<SkiaShape> {
     let text = |t: &str| label(t, 13).text_color(hex(pal().text_body)).accessibility_role(Aria::TEXT);
     screen(
-        Page::Help,
         "Help",
         SkiaStack::new().spacing(16).children((
             SkiaStack::new().spacing(6).children((
@@ -566,8 +639,8 @@ fn help_panel() -> Build<SkiaShape> {
                 tool_button(|_| ("↗", "DrawnUI for Rust")).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/DrawnUi/DrawnUi.Rust")),
             )),
             SkiaRow::new().spacing(8).margin((0, 4, 0, 0)).children((
-                pill("GitHub", false).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals")),
-                pill("Report an issue", true).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals/issues/new")),
+                pill("GitHub").on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals")),
+                pill("Report an issue").on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals/issues/new")),
             )),
             )),
         )),
@@ -699,7 +772,7 @@ fn open_answers(app: &mut App, cx: &mut Cx) {
         },
     };
     app.answers = Some(AnswersView { id: id.clone(), name: m.name, live, list: None, filter: String::new(), shown: Vec::new(), open: None, menu: None, copied: false });
-    fill_answers(app, cx);
+    open_screen(app, cx, "answers");
     let shared = app.shared.clone();
     shared.lock().unwrap().answers = None;
     std::thread::spawn(move || {
@@ -849,14 +922,13 @@ fn opened(app: &App) -> Option<&answers::Answer> {
 
 /// Answers: a screen over the whole window. A header with Back and whose answers they are; then
 /// the search and the list, or one answer in full under a toolbar (Pin, Copy, Go to session).
-fn answers_panel(app: &mut App) -> Build<SkiaShape> {
+fn answers_page(app: &mut App) -> Build<SkiaShape> {
     let listing = |app: &App| app.answers.as_ref().is_some_and(|v| v.open.is_none());
     SkiaShape::new()
         .fill()
         .background_color(hex(pal().bg))
         .padding((12, 10, 12, 12))
         .observe(|me, app: &App| {
-            me.set_is_visible(app.answers.is_some());
             if let Some(view) = &app.answers {
                 me.set_accessibility_label(format!("Answers of {}", view.name));
             }
@@ -920,6 +992,7 @@ fn answers_panel(app: &mut App) -> Build<SkiaShape> {
                     tool_button(|_| ("↗", "Go to session")).on_tapped(|_me, app: &mut App, cx| {
                         if let Some(view) = app.answers.take() {
                             close_popup(app, cx);
+                            cx.go_back(app.shell, true);
                             let _ = app.tx.send(if view.live { Cmd::Focus(view.name) } else { Cmd::ReopenOne(view.id) });
                         }
                     }),
@@ -1000,15 +1073,12 @@ fn back_button() -> Build<SkiaShape> {
         .children((label("←  Back", 13).text_color(hex(pal().text)),))
 }
 
+/// Back: from an open answer to the answers, from a screen to the list.
 fn go_back(app: &mut App, cx: &mut Cx) {
     close_popup(app, cx);
-    if app.page != Page::Main {
-        app.page = Page::Main;
-        return;
-    }
     match &mut app.answers {
         Some(view) if view.open.is_some() => view.open = None,
-        _ => app.answers = None,
+        _ => cx.go_back(app.shell, true),
     }
 }
 
@@ -1450,6 +1520,7 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
             me.set_background_color(color(app));
             // Read out: the name, what it does now, where it runs.
             let Some(s) = app.session(pid) else { return };
+            me.set_is_visible(shows(app, s));
             let status = match s.status.as_str() {
                 "waiting" if s.waiting_for.is_empty() => "waiting for you".to_string(),
                 "waiting" => format!("waiting for you: {}", s.waiting_for),
@@ -1548,14 +1619,17 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
 
 /// A terminal session that is not running: gray, a click reopens it in a terminal tab.
 fn closed_row(id: String, name: String) -> Build<SkiaShape> {
-    let (reopen, menu, folder, tint) = (id.clone(), id.clone(), id.clone(), name.clone());
+    let (reopen, menu, folder, tint, filter_id) = (id.clone(), id.clone(), id.clone(), name.clone(), id.clone());
     let key = format!("c{id}");
     let color = move |app: &App| row_color(app.tint(&tint), false, app.hovered.as_deref() == Some(key.as_str()));
     let (shade, hover_key) = (color.clone(), format!("c{id}"));
     SkiaShape::new()
         .corner_radius(10)
         .background_color(hex(pal().row))
-        .observe(move |me, app: &App| me.set_background_color(color(app)))
+        .observe(move |me, app: &App| {
+            me.set_background_color(color(app));
+            me.set_is_visible(app.inactive(&filter_id).is_some_and(|s| shows_closed(app, s)));
+        })
         .on_hovered(move |me, app: &mut App, _cx, on| {
             app.hovered = on.then(|| hover_key.clone());
             me.set_background_color(shade(app));
@@ -1670,7 +1744,9 @@ fn sync(app: &mut App, cx: &mut Cx) {
                 fill_answers(app, cx);
             }
         }
-        if key != app.session_key {
+        // The list is in the window once the shell has laid out its root: until then the rows
+        // wait, and the next tick tries again (the key stays old).
+        if key != app.session_key && cx.find::<SkiaLayout>(app.session_stack).is_some() {
             cx.clear_children(app.session_stack);
             for (pid, name) in &key.0 {
                 cx.add_child(app.session_stack, session_row(*pid, name.clone()));
@@ -1679,6 +1755,9 @@ fn sync(app: &mut App, cx: &mut Cx) {
                 cx.add_child(app.session_stack, closed_row(s.id.clone(), s.label.clone()));
             }
             app.session_key = key;
+        } else if key != app.session_key {
+            // Not in the window yet: copy the state again at the next tick.
+            app.seen = u64::MAX;
         }
     }
 }
@@ -1737,7 +1816,9 @@ pub fn run() {
             tints: HashMap::new(),
             unseen: Default::default(),
             hovered: None,
-            page: Page::Main,
+            shell: Handle::default(),
+            route: String::new(),
+            filter: String::new(),
             topmost: false,
             theme: String::new(),
             language: String::new(),
@@ -1765,8 +1846,7 @@ pub fn run() {
                 .background(hex(pal().bg))
                 .on_key_down(|app: &mut App, event, cx| {
                     match &*event.key {
-                        "Escape" if app.answers.is_some() => go_back(app, cx),
-                        "Escape" if app.page != Page::Main => app.page = Page::Main,
+                        "Escape" if !app.route.is_empty() => go_back(app, cx),
                         "Comma" if event.keyboard.is_control_pressed() => open_settings(app, cx),
                         "F1" => open_help(app, cx),
                         _ => return false,
@@ -1812,7 +1892,9 @@ mod menu_keys {
             tints: HashMap::new(),
             unseen: Default::default(),
             hovered: None,
-            page: Page::Main,
+            shell: Handle::default(),
+            route: String::new(),
+            filter: String::new(),
             topmost: false,
             theme: String::new(),
             language: String::new(),
@@ -1868,6 +1950,10 @@ mod menu_keys {
             answers::Answer { question: "how do I deploy?".into(), answer: "Run dev/deploy.ps1 from the repo.".into(), at_ms: 0 },
         ];
         host.ui.state.answers = Some(AnswersView { id: "a".into(), name: "api".into(), live: true, list: Some(Ok(list)), filter: String::new(), shown: Vec::new(), open: None, menu: None, copied: false });
+        // The screen comes up as the menu's Answers brings it: pushed on the shell.
+        let shell = host.ui.state.shell;
+        host.ui.tree.cx().go_to(shell, "answers", false);
+        host.settle();
         fill_answers(&mut host.ui.state, &mut host.ui.tree.cx());
         host.ui.state_changed();
         host.settle();
@@ -1907,6 +1993,15 @@ mod menu_keys {
         host.ui.state_changed();
         host.settle();
         assert!(has(&host, Aria::BUTTON, "Pinned. Run dev/deploy.ps1 from the repo. Question: how do I deploy?"));
+    }
+
+    /// The filter: every word somewhere in the fields, ignoring case.
+    #[test]
+    fn filter_words() {
+        assert!(matches_filter("", &["api"]));
+        assert!(matches_filter("API serv", &["api-server", "C:\\Work"]));
+        assert!(matches_filter("work api", &["api-server", "C:\\Work"]));
+        assert!(!matches_filter("api zzz", &["api-server", "C:\\Work"]));
     }
 
     #[test]

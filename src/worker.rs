@@ -450,6 +450,7 @@ fn parse(v: &Value) -> Option<Session> {
         interactive: matches!(text("kind").as_str(), "interactive" | "") && matches!(text("entrypoint").as_str(), "cli" | ""),
         vscode: text("entrypoint") == "claude-vscode",
         title,
+        remote: text("bridgeSessionId"),
         // Claude Code's statuses: busy, shell (running a shell command, which its own UI shows as
         // working), idle, waiting.
         status: match v.get("status").and_then(Value::as_str).unwrap_or("idle") {

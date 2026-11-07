@@ -24,6 +24,8 @@ pub struct Session {
     pub vscode: bool,
     /// What its terminal tab shows when it has no name of its own (custom or AI title).
     pub title: String,
+    /// Its Remote Control session id (claude.ai/code), when Remote Control is on.
+    pub remote: String,
     /// `busy`, `idle` or `waiting`.
     pub status: String,
     /// What a `waiting` session waits for (`input needed`, `dialog open`...).
@@ -513,7 +515,7 @@ mod tests {
     use super::*;
 
     fn s(pid: u32, status: &str, since_ms: u64) -> Session {
-        Session { pid, id: String::new(), name: format!("s{pid}"), named: true, interactive: true, vscode: false, title: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms }
+        Session { pid, id: String::new(), name: format!("s{pid}"), named: true, interactive: true, vscode: false, title: String::new(), remote: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms }
     }
 
     fn map(list: &[Session]) -> HashMap<u32, Session> {
