@@ -167,28 +167,20 @@ fn content(app: &mut App) -> Build<SkiaLayout> {
             // title is on the window frame.
             SkiaGrid::new().fill_x().column_definitions("*, Auto").row(0).children((
             SkiaWrap::new().fill_x().padding((16, 12, 8, 8)).spacing(12).children((
-                SkiaRow::new().spacing(8).children((
-                    switch("Keep window on top")
-                        .observe(|me, app: &App| me.set_is_toggled(app.topmost))
-                        .on_toggled(|_me, app: &mut App, _cx, on| {
-                            app.topmost = on;
-                            let _ = app.tx.send(Cmd::Topmost(on));
-                        }),
-                    label("On top", 14).vertical_options(LayoutOptions::Center),
-                )),
-                SkiaRow::new().spacing(8).children((
-                    switch("Mute all signals")
-                        .observe(|me, app: &App| me.set_is_toggled(app.muted))
-                        .on_toggled(|_me, app: &mut App, _cx, on| {
-                            // The window's copy too, at once: `observe` sets the switch from it, and a
-                            // copy still saying the old value until the next sync would flip it back.
-                            app.muted = on;
-                            let mut st = app.shared.lock().unwrap();
-                            st.muted = on;
-                            st.version += 1;
-                        }),
-                    label("Mute", 14).vertical_options(LayoutOptions::Center),
-                )),
+                // While signals are muted the header says so; a click turns them back on.
+                SkiaShape::new()
+                    .corner_radius(6)
+                    .padding((8, 3, 8, 3))
+                    .background_color(hex(pal().border))
+                    .vertical_options(LayoutOptions::Center)
+                    .accessibility_role(Aria::BUTTON)
+                    .accessibility_label("Signals are muted. Click to turn them back on.")
+                    .observe(|me, app: &App| me.set_is_visible(app.muted))
+                    .on_hovered(|me, _app: &mut App, _cx, on| {
+                        me.set_background_color(hex(if on { mix(pal().border, pal().hover_toward, pal().hover_control) } else { pal().border }))
+                    })
+                    .on_tapped(|_me, app: &mut App, _cx| set_muted(app, false))
+                    .children((label("🔇 Muted", 13).text_color(hex(pal().text)),)),
                 label("", 13).text_color(hex(pal().text_soft)).vertical_options(LayoutOptions::Center).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
                     let count = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
                     let closed = if app.inactive.is_empty() { String::new() } else { format!(" · {} closed", app.inactive.len()) };
@@ -199,7 +191,9 @@ fn content(app: &mut App) -> Build<SkiaLayout> {
                     me.set_text(format!("{} waiting{asked} · {} busy · {} idle{closed}", count("waiting"), count("busy"), count("idle")));
                 }),
             )),
-            SkiaRow::new().column(1).spacing(2).padding((0, 10, 10, 0)).vertical_options(LayoutOptions::Start).accessibility_role(Aria::TOOLBAR).children((
+            // Margins, not padding: the group's own box starts where its icons do, so the keyboard
+            // reaches it on the header's line, after what is left of it.
+            SkiaRow::new().column(1).spacing(2).margin((0, 10, 10, 0)).vertical_options(LayoutOptions::Start).accessibility_role(Aria::TOOLBAR).children((
                 icon_button(icons::SETTINGS, "Settings", "Opens the settings", open_settings),
                 icon_button(icons::CIRCLE_QUESTION_MARK, "Help", "Opens the help", open_help),
             )),
@@ -331,6 +325,15 @@ fn setting_switch(name: &str, about: &str, get: fn(&App) -> bool, set: fn(&mut A
     ))
 }
 
+/// Mute on or off, at once in the window's copy too: a switch observing it would flip back if the
+/// copy still said the old value until the next sync.
+fn set_muted(app: &mut App, on: bool) {
+    app.muted = on;
+    let mut st = app.shared.lock().unwrap();
+    st.muted = on;
+    st.version += 1;
+}
+
 /// The settings saved for the worker, the update check and the next start.
 fn save_settings(app: &App) {
     let mut st = app.shared.lock().unwrap();
@@ -365,6 +368,15 @@ fn settings_panel() -> Build<SkiaShape> {
                 theme("dark", "Dark"),
                 theme("light", "Light"),
             )),
+            )),
+            SkiaStack::new().spacing(10).children((
+            heading("Signals"),
+            setting_switch(
+                "Mute all signals",
+                "Silences every sound, voice, notification and flash, for example during a call. Status changes still show under Recent.",
+                |app| app.muted,
+                |app, _cx, on| set_muted(app, on),
+            ),
             )),
             SkiaStack::new().spacing(10).children((
             heading("Sessions"),
@@ -409,6 +421,10 @@ fn settings_panel() -> Build<SkiaShape> {
             )),
             SkiaStack::new().spacing(10).children((
             heading("App"),
+            setting_switch("Keep window on top", "Agent Signals stays above other windows.", |app| app.topmost, |app, _cx, on| {
+                app.topmost = on;
+                let _ = app.tx.send(Cmd::Topmost(on));
+            }),
             setting_switch(login, "Agent Signals starts when you sign in, from where it is now.", |app| app.start_at_login, |app, _cx, on| {
                 match platform::set_start_at_login(on) {
                     Ok(()) => {
@@ -480,6 +496,18 @@ fn help_panel() -> Build<SkiaShape> {
             SkiaStack::new().spacing(6).children((
             heading("For agents"),
             text("Claude agents set up signals through the app's local API at http://127.0.0.1:47801; open it in a browser for the list of calls."),
+            )),
+            SkiaStack::new().spacing(6).children((
+            heading("About"),
+            text(concat!("Agent Signals ", env!("CARGO_PKG_VERSION"), ", free and open source (MIT).")),
+            SkiaRow::new().spacing(4).children((
+                text("Built with"),
+                tool_button(|_| ("↗", "DrawnUI for Rust")).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/DrawnUi/DrawnUi.Rust")),
+            )),
+            SkiaRow::new().spacing(8).margin((0, 4, 0, 0)).children((
+                button("GitHub", pal().border).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals")),
+                button("Report an issue", pal().accent).on_tapped(|_me, _app: &mut App, _cx| platform::open_url("https://github.com/taublast/AgentSignals/issues/new")),
+            )),
             )),
         )),
     )
