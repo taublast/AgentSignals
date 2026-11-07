@@ -162,42 +162,19 @@ fn rebuild(app: &mut App, cx: &mut Cx) {
 
 fn content(app: &mut App) -> Build<SkiaLayout> {
     SkiaLayer::new().fill().background_color(hex(pal().bg)).children((
-        SkiaGrid::new().fill().column_definitions("*").row_definitions("Auto, *").row_spacing(0).children((
-            // Header: wraps to more lines in a narrow window, Settings and Help at its right end. The
-            // title is on the window frame.
-            SkiaGrid::new().fill_x().column_definitions("*, Auto").row(0).children((
-            SkiaWrap::new().fill_x().padding((16, 16, 8, 12)).spacing(12).children((
-                // While signals are muted the header says so; a click turns them back on.
-                SkiaShape::new()
-                    .corner_radius(6)
-                    .padding((8, 3, 8, 3))
-                    .background_color(hex(pal().border))
-                    .vertical_options(LayoutOptions::Center)
-                    .accessibility_role(Aria::BUTTON)
-                    .accessibility_label("Signals are muted. Click to turn them back on.")
-                    .observe(|me, app: &App| me.set_is_visible(app.muted))
-                    .on_hovered(|me, _app: &mut App, _cx, on| {
-                        me.set_background_color(hex(if on { mix(pal().border, pal().hover_toward, pal().hover_control) } else { pal().border }))
-                    })
-                    .on_tapped(|_me, app: &mut App, _cx| set_muted(app, false))
-                    .children((label("🔇 Muted", 13).text_color(hex(pal().text)),)),
-                label("", 13).text_color(hex(pal().text_soft)).vertical_options(LayoutOptions::Center).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
-                    let count = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
-                    let closed = if app.inactive.is_empty() { String::new() } else { format!(" · {} closed", app.inactive.len()) };
-                    let asked = match count("question") {
-                        0 => String::new(),
-                        n => format!(" · {n} asked"),
-                    };
-                    me.set_text(format!("{} waiting{asked} · {} busy · {} idle{closed}", count("waiting"), count("busy"), count("idle")));
-                }),
-            )),
-            // Margins, not padding: the group's own box starts where its icons do, so the keyboard
-            // reaches it on the header's line, after what is left of it.
-            SkiaRow::new().column(1).spacing(2).margin((0, 14, 10, 0)).vertical_options(LayoutOptions::Start).accessibility_role(Aria::TOOLBAR).children((
-                icon_button(icons::SETTINGS, "Settings", "Opens the settings", open_settings),
-                icon_button(icons::CIRCLE_QUESTION_MARK, "Help", "Opens the help", open_help),
-            )),
-            )),
+        SkiaGrid::new().fill().column_definitions("*").row_definitions("Auto, *, Auto").row_spacing(0).children((
+            // Header: Settings and Help at its right end. The title is on the window frame.
+            SkiaRow::new()
+                .row(0)
+                .spacing(2)
+                .margin((0, 14, 10, 10))
+                .horizontal_options(LayoutOptions::End)
+                .accessibility_role(Aria::TOOLBAR)
+                .children((
+                    icon_button(icons::SETTINGS, "Settings", "Opens the settings", open_settings),
+                    icon_button(icons::CIRCLE_QUESTION_MARK, "Help", "Opens the help", open_help),
+                )),
+            status_bar().row(2),
             SkiaScroll::new()
                 .fill()
                 .row(1)
@@ -220,6 +197,71 @@ fn content(app: &mut App) -> Build<SkiaLayout> {
         answers_panel(app),
         settings_panel(),
         help_panel(),
+    ))
+}
+
+/// The bottom line: how many sessions wait, asked, work, rest, are closed, each with its dot (none
+/// for a count of zero), and the Muted chip at the right while signals are muted.
+fn status_bar() -> Build<SkiaLayout> {
+    let count = |status: &'static str, word: &'static str| {
+        let n = move |app: &App| match status {
+            "closed" => app.inactive.len(),
+            _ => app.sessions.iter().filter(|s| s.status == status).count(),
+        };
+        let color = match status {
+            "waiting" => Some(pal().waiting),
+            "question" => Some(pal().question),
+            "busy" => Some(pal().busy),
+            "idle" => Some(pal().idle),
+            _ => None,
+        };
+        SkiaRow::new().spacing(5).observe(move |me, app: &App| me.set_is_visible(n(app) > 0)).children((
+            SkiaShape::new()
+                .corner_radius(3.5)
+                .width_request(7)
+                .height_request(7)
+                .vertical_options(LayoutOptions::Center)
+                .background_color(color.map_or(Color::TRANSPARENT, hex))
+                .is_visible(color.is_some()),
+            label("", 12).text_color(hex(pal().text_soft)).vertical_options(LayoutOptions::Center).observe(move |me, app: &App| me.set_text(format!("{} {word}", n(app)))),
+        ))
+    };
+    // A line on top keeps it apart from the list in both themes.
+    SkiaStack::new().fill_x().spacing(0).children((
+    SkiaShape::new().fill_x().height_request(1).background_color(hex(pal().border)),
+    SkiaGrid::new()
+        .fill_x()
+        .column_definitions("*, Auto")
+        .padding((14, 6, 10, 6))
+        .background_color(hex(pal().row))
+        .children((
+            SkiaWrap::new()
+                .spacing(14)
+                .vertical_options(LayoutOptions::Center)
+                .accessibility_role(Aria::STATUS)
+                .observe(|me, app: &App| {
+                    let n = |s: &str| app.sessions.iter().filter(|x| x.status == s).count();
+                    let parts = [(n("waiting"), "waiting"), (n("question"), "asked"), (n("busy"), "working"), (n("idle"), "idle"), (app.inactive.len(), "closed")];
+                    let text: Vec<String> = parts.iter().filter(|(n, _)| *n > 0).map(|(n, w)| format!("{n} {w}")).collect();
+                    me.set_accessibility_label(if text.is_empty() { "No sessions".to_string() } else { text.join(", ") });
+                })
+                .children((count("waiting", "waiting"), count("question", "asked"), count("busy", "working"), count("idle", "idle"), count("closed", "closed"))),
+            // While signals are muted the bar says so; a click turns them back on.
+            SkiaShape::new()
+                .column(1)
+                .corner_radius(6)
+                .padding((8, 2, 8, 2))
+                .background_color(hex(pal().border))
+                .vertical_options(LayoutOptions::Center)
+                .accessibility_role(Aria::BUTTON)
+                .accessibility_label("Signals are muted. Click to turn them back on.")
+                .observe(|me, app: &App| me.set_is_visible(app.muted))
+                .on_hovered(|me, _app: &mut App, _cx, on| {
+                    me.set_background_color(hex(if on { mix(pal().border, pal().hover_toward, pal().hover_control) } else { pal().border }))
+                })
+                .on_tapped(|_me, app: &mut App, _cx| set_muted(app, false))
+                .children((label("🔇 Muted", 12).text_color(hex(pal().text)),)),
+        )),
     ))
 }
 
