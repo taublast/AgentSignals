@@ -87,16 +87,57 @@ fn text_of(content: &Value) -> Option<String> {
     }
 }
 
-/// The entries whose question or answer holds every word of `filter`, ignoring case.
-pub fn matching<'a>(list: &'a [Answer], filter: &str) -> Vec<(usize, &'a Answer)> {
+/// The search's words, lower case, each with whether it may be the start of a longer word: only
+/// the last one, while it is still being typed ("mac sign" finds "Mac" and "signed", not "machine").
+fn terms(filter: &str) -> Vec<(String, bool)> {
+    let open = !filter.ends_with(char::is_whitespace);
     let words: Vec<String> = filter.split_whitespace().map(str::to_lowercase).collect();
-    list.iter()
+    let last = words.len().saturating_sub(1);
+    words.into_iter().enumerate().map(|(i, w)| (w, open && i == last)).collect()
+}
+
+/// The entries that hold every word of `filter` in their question or their answer, ignoring case:
+/// the ones whose question has them all first, then the ones found in the answer, each in list order.
+pub fn matching<'a>(list: &'a [Answer], filter: &str) -> Vec<(usize, &'a Answer)> {
+    let terms = terms(filter);
+    let (mut asked, answered): (Vec<_>, Vec<_>) = list
+        .iter()
         .enumerate()
         .filter(|(_, a)| {
             let (q, t) = (a.question.to_lowercase(), a.answer.to_lowercase());
-            words.iter().all(|w| q.contains(w) || t.contains(w))
+            terms.iter().all(|(w, prefix)| find_word(&q, w, *prefix).is_some() || find_word(&t, w, *prefix).is_some())
         })
-        .collect()
+        .partition(|(_, a)| {
+            let q = a.question.to_lowercase();
+            terms.iter().all(|(w, prefix)| find_word(&q, w, *prefix).is_some())
+        });
+    asked.extend(answered);
+    asked
+}
+
+/// Where `word` first stands as a word of `text` (both lower case), as a byte offset; with
+/// `prefix`, also as the start of a longer word.
+fn find_word(text: &str, word: &str, prefix: bool) -> Option<usize> {
+    if word.is_empty() {
+        return Some(0);
+    }
+    let edge = |c: Option<char>| c.is_none_or(|c| !c.is_alphanumeric());
+    text.match_indices(word).map(|(i, _)| i).find(|&i| edge(text[..i].chars().next_back()) && (prefix || edge(text[i + word.len()..].chars().next())))
+}
+
+/// The part of `text` around the first hit of `filter`'s first word, on one line, with "…" where
+/// it was cut: what a search result shows so the hit is seen. `None` when no word is in `text`.
+pub fn snippet(text: &str, filter: &str) -> Option<String> {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = flat.to_lowercase();
+    let at = terms(filter).iter().find_map(|(w, prefix)| find_word(&lower, w, *prefix))?;
+    // Lower case can change a text's byte length (rare letters): start on the same character.
+    let chars_before = lower[..at].chars().count();
+    let from = chars_before.saturating_sub(30);
+    // Start at a word, not in the middle of one.
+    let start = flat.char_indices().nth(from).map_or(0, |(i, _)| i);
+    let start = if from == 0 { 0 } else { flat[start..].find(' ').map_or(start, |s| start + s + 1) };
+    Some(if start == 0 { flat } else { format!("…{}", &flat[start..]) })
 }
 
 #[cfg(test)]
@@ -131,6 +172,21 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].0, 0);
         assert_eq!(matching(&list, "").len(), 2);
+        // Words match from their start, the question's matches come first.
+        let list = [
+            Answer { question: "and the design?".into(), answer: "Signed by the Mac.".into(), at_ms: 0 },
+            Answer { question: "how do we sign the build?".into(), answer: "With the certificate.".into(), at_ms: 0 },
+            Answer { question: "fonts".into(), answer: "Assign them in the redesign.".into(), at_ms: 0 },
+        ];
+        assert_eq!(matching(&list, "sign").iter().map(|m| m.0).collect::<Vec<_>>(), [1, 0]);
+        // A finished word (a space after it) matches whole words only.
+        assert_eq!(matching(&list, "sign ").iter().map(|m| m.0).collect::<Vec<_>>(), [1]);
+        let mac = [Answer { question: "q".into(), answer: "on your machine".into(), at_ms: 0 }, Answer { question: "q".into(), answer: "on the Mac, signed".into(), at_ms: 0 }];
+        assert_eq!(matching(&mac, "mac sign").iter().map(|m| m.0).collect::<Vec<_>>(), [1]);
+        let long = "First a long introduction that goes on and on about nothing much at all, then the release notes come.";
+        assert_eq!(snippet(long, "release").unwrap(), "…much at all, then the release notes come.");
+        assert_eq!(snippet("Release first.", "release").unwrap(), "Release first.");
+        assert_eq!(snippet("nothing here", "release"), None);
         assert_eq!(epoch_ms("1970-01-01T00:00:01Z"), Some(1000));
         assert_eq!(epoch_ms("2000-03-01T00:00:00.5Z"), Some(951_868_800_500));
     }

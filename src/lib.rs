@@ -429,7 +429,9 @@ fn bind_answer(cell: &AnswerCell, app: &App, row: usize, cx: &mut Cx) {
         me.set_text(asked(app, entry));
     }
     if let Some(mut me) = cx.get_mut(cell.answer) {
-        me.set_text(answer);
+        // While searching: the passage with the hit, so it is seen why the entry is listed.
+        let hit = Some(view.filter.as_str()).filter(|f| !f.trim().is_empty()).and_then(|f| answers::snippet(&entry.answer, f));
+        me.set_text(hit.unwrap_or(answer));
     }
 }
 
