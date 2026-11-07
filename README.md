@@ -28,7 +28,7 @@ through tabs to find out.
 Nothing to configure in Claude Code: the app reads the list of sessions Claude Code already keeps.
 Windows and macOS, written in Rust, its UI drawn with [DrawnUi.Rust](https://github.com/DrawnUi/DrawnUi.Rust).
 
-<img src="docs/screenshot.png" alt="Agent Signals: the filter field with Settings and Help, sessions waiting (yellow), asking a question (blue, from VS Code), working (green), just finished (red) and idle (gray) with their signal icons, two rows tinted, closed sessions ready to reopen, and the status bar with the counts" width="420">
+<img src="docs/screenshot.png" alt="Agent Signals: the filter field with Settings and Help, sessions waiting (yellow), working (green), asking a question (blue, from VS Code), just finished (red) and idle (gray) with their signal icons, two rows tinted, closed sessions ready to reopen, and the status bar with the counts" width="420">
 
 ## The window
 
