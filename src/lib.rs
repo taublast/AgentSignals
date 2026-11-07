@@ -433,6 +433,79 @@ fn screen(title: &str, body: Build<SkiaLayout>) -> Build<SkiaShape> {
         )))
 }
 
+/// A language by its own name, so anyone finds theirs whatever the app shows now; "System" says
+/// which one it follows.
+fn language_name(code: &str) -> String {
+    if code.is_empty() {
+        format!("{} ({})", tr("System"), i18n::native_name(i18n::system()))
+    } else {
+        i18n::native_name(code).to_string()
+    }
+}
+
+/// The Language dropdown: the current language and a chevron; the list opens under it.
+fn language_button() -> Build<SkiaShape> {
+    SkiaShape::new()
+        .corner_radius(6)
+        .stroke_width(1.55)
+        .stroke_color(hex(pal().border))
+        .padding((10, 5, 8, 5))
+        .vertical_options(LayoutOptions::Center)
+        .accessibility_role(Aria::BUTTON)
+        .observe(|me, app: &App| me.set_accessibility_label(format!("{}: {}", tr("Language"), language_name(&app.language))))
+        .on_hovered(|me, _app: &mut App, _cx, over| {
+            me.set_background_color(if over { hex(mix(pal().bg, pal().hover_toward, pal().hover_control)) } else { Color::TRANSPARENT });
+        })
+        .on_tapped(|me, app: &mut App, cx| {
+            close_popup(app, cx);
+            let options = PopupWindowOptions { cpu: true, ..Default::default() };
+            app.popup = Some(cx.open_popup_window(language_menu(), me.id(), options));
+        })
+        .children(SkiaRow::new().spacing(6).vertical_options(LayoutOptions::Center).children((
+            label("", 13).vertical_options(LayoutOptions::Center).observe(|me, app: &App| me.set_text(language_name(&app.language))),
+            SkiaSvg::from_string(icons::CHEVRON_DOWN).width_request(14).height_request(14).tint_color(hex(pal().text_soft)).vertical_options(LayoutOptions::Center),
+        )))
+}
+
+/// The language list: System first, then every language; the current one carries a check.
+fn language_menu() -> Build<SkiaShape> {
+    let codes = std::iter::once("").chain(i18n::LANGUAGES.iter().map(|&(code, _)| code));
+    let items: Vec<_> = codes
+        .map(|code| {
+            SkiaShape::new()
+                .corner_radius(6)
+                .fill_x()
+                .padding((10, 8, 12, 8))
+                .accessibility_role(Aria::MENU_ITEM_RADIO)
+                .accessibility_label(language_name(code))
+                .observe(move |me, app: &App| me.set_accessibility_is_pressed(Some(app.language == code)))
+                .on_hovered(hover_item)
+                .on_tapped(move |_me, app: &mut App, cx| {
+                    close_popup(app, cx);
+                    if app.language != code {
+                        app.language = code.to_string();
+                        save_settings(app);
+                        i18n::set(code);
+                        rebuild(app, cx);
+                    }
+                })
+                .children(SkiaRow::new().spacing(8).children((
+                    // The check's place stays when it is not there, so the names line up.
+                    label("", 14).width_request(14).observe(move |me, app: &App| me.set_text(if app.language == code { "✓" } else { "" })),
+                    label(&language_name(code), 14),
+                )))
+        })
+        .collect();
+    SkiaShape::new()
+        .corner_radius(8)
+        .background_color(hex(pal().panel))
+        .stroke_color(hex(pal().border))
+        .stroke_width(1.55)
+        .width_request(220)
+        .padding((4, 4, 4, 4))
+        .children(SkiaStack::new().accessibility_role(Aria::MENU).accessibility_label(tr("Language")).children(items))
+}
+
 /// A section title inside a screen.
 fn heading(text: &str) -> Build<SkiaLabel> {
     label(text, 13).text_color(hex(pal().text_soft)).margin((0, 8, 0, 0)).accessibility_role(Aria::HEADING)
@@ -509,17 +582,6 @@ fn settings_page() -> Build<SkiaShape> {
             rebuild(app, cx);
         })
     };
-    // A language shows under its own name, so anyone finds theirs whatever the app shows now.
-    let language = |code: &'static str, text: String| {
-        chip(&text, move |app: &App| app.language == code, move |app: &mut App, cx| {
-            app.language = code.to_string();
-            save_settings(app);
-            i18n::set(code);
-            rebuild(app, cx);
-        })
-    };
-    let mut languages = vec![language("", format!("{} ({})", tr("System"), i18n::native_name(i18n::system())))];
-    languages.extend(i18n::LANGUAGES.iter().map(|&(code, name)| language(code, name.to_string())));
     let login = if cfg!(windows) { tr("Start with Windows") } else { tr("Open at login") };
     screen(
         tr("Settings"),
@@ -532,8 +594,10 @@ fn settings_page() -> Build<SkiaShape> {
                 theme("dark", tr("Dark")),
                 theme("light", tr("Light")),
             )),
-            label(tr("Language"), 14).text_color(hex(pal().text)).margin((0, 6, 0, 0)),
-            SkiaWrap::new().spacing(8).accessibility_role(Aria::RADIO_GROUP).accessibility_label(tr("Language")).children(languages),
+            SkiaGrid::new().fill_x().column_definitions("*, Auto").margin((0, 6, 0, 0)).children((
+                label(tr("Language"), 14).text_color(hex(pal().text)).vertical_options(LayoutOptions::Center),
+                language_button().column(1),
+            )),
             )),
             SkiaStack::new().spacing(10).children((
             heading(tr("Signals")),
