@@ -11,7 +11,7 @@ use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
 use windows::Win32::Media::Speech::{ISpVoice, SPF_ASYNC, SPF_IS_FILENAME, SPF_IS_NOT_XML, SpVoice};
 use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW};
-use windows::Win32::System::Threading::{GetCurrentProcessId, GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows::Win32::System::Threading::{GetCurrentProcessId, GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationInvokePattern, IUIAutomationSelectionItemPattern, TreeScope_Descendants,
     UIA_InvokePatternId, UIA_SelectionItemPatternId, UIA_TabItemControlTypeId,
@@ -475,6 +475,19 @@ pub fn set_topmost(on: bool) {
     let after = if on { HWND_TOPMOST } else { HWND_NOTOPMOST };
     unsafe {
         let _ = SetWindowPos(hwnd, Some(after), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+/// When the process started, as a FILETIME (100 ns steps since 1601, UTC): what Claude Code writes as
+/// `procStart` in a session file on Windows.
+pub fn process_started(pid: u32) -> Option<u64> {
+    use windows::Win32::Foundation::FILETIME;
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let (mut created, mut exited, mut kernel, mut user) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+        let read = GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user).is_ok();
+        let _ = CloseHandle(handle);
+        read.then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
     }
 }
 

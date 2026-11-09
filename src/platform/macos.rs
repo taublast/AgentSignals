@@ -877,6 +877,13 @@ mod ax {
     }
 }
 
+/// The process's start time in Claude Code's `procStart` unit; not read on macOS yet, so a session
+/// file counts as live while its PID runs.
+// ponytail: macOS unit of procStart unverified; read kinfo_proc p_starttime once it is known.
+pub fn process_started(_pid: u32) -> Option<u64> {
+    None
+}
+
 /// Asking after a process without starting one: this runs for every session twice a second.
 /// Signal 0 only checks; a process of another user answers "not allowed", which means it is there.
 pub fn pid_alive(pid: u32) -> bool {

@@ -20,7 +20,8 @@
 //!   exits next), `clean_after_update()` (removes what the swap left, at the next start).
 //! - Settings: `system_dark()` (the system's light or dark mode), `starts_at_login()`,
 //!   `set_start_at_login(on) -> Result<()>` (this program, where it is now, starts at sign-in).
-//! - `pid_alive(pid)`.
+//! - `pid_alive(pid)`; `process_started(pid) -> Option<u64>`: the process's start time in the unit
+//!   Claude Code writes as `procStart` in its session files, `None` where it is not known.
 //! - Folders: `home_dir()` (where `.claude` lives), `data_dir()` (the per-user app data folder;
 //!   the app keeps its files in `AgentSignals` under it), `sound_dirs()` (system sounds),
 //!   `SOUND_EXTENSIONS` (first = the one `GET /sounds` lists), `FINISHED_SOUND` (the menu's sound).

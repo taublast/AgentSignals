@@ -53,7 +53,7 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
     let signals = Signals::new();
     let dir = sessions_dir();
     // File -> (modified, parsed); a file is parsed again only when it changed.
-    let mut files: HashMap<PathBuf, (SystemTime, Option<Session>)> = HashMap::new();
+    let mut files: HashMap<PathBuf, (SystemTime, Parsed)> = HashMap::new();
     let mut live: HashMap<u32, Session> = HashMap::new();
     let mut first = true;
     let mut next_poll = Instant::now();
@@ -393,8 +393,13 @@ pub fn sound_names() -> Vec<String> {
     names
 }
 
-/// The live sessions: `<pid>.json` files whose process still runs.
-fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Option<Session>)>) -> HashMap<u32, Session> {
+/// A session file as read: the session and its process's start time (`procStart`), if it has one.
+type Parsed = Option<(Session, Option<u64>)>;
+
+/// The live sessions: `<pid>.json` files whose process still runs. A file left behind by a session
+/// that ended without removing it (a restart, a crash) can name a PID the system has since given to
+/// another program: where the file records its process's start time, the process must match it.
+fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Parsed)>) -> HashMap<u32, Session> {
     let mut seen = HashMap::new();
     let Ok(entries) = std::fs::read_dir(dir) else { return seen };
     let mut present = Vec::new();
@@ -408,12 +413,20 @@ fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Option<Session>
         let parsed = match files.get(&path) {
             Some((m, s)) if *m == modified => s.clone(),
             _ => {
-                let s = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| parse(&v));
+                let s = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| {
+                    let started = v.get("procStart").and_then(Value::as_str).and_then(|t| t.parse().ok());
+                    parse(&v).map(|s| (s, started))
+                });
                 files.insert(path.clone(), (modified, s.clone()));
                 s
             }
         };
-        if let Some(s) = parsed.filter(|s| platform::pid_alive(s.pid)) {
+        let Some((s, started)) = parsed else { continue };
+        let same_process = match (started, platform::process_started(s.pid)) {
+            (Some(recorded), Some(actual)) => recorded == actual,
+            _ => true,
+        };
+        if same_process && platform::pid_alive(s.pid) {
             seen.insert(s.pid, s);
         }
     }
@@ -565,6 +578,17 @@ mod tests {
         let live = poll(&dir, &mut files);
         assert_eq!(live.len(), 1);
         assert_eq!(live[&me].name, "me");
+        // Where the platform reads process start times: a file whose recorded start is not this
+        // process's (the PID was reused after its session ended) is not a live session; the
+        // matching one is.
+        if let Some(started) = platform::process_started(me) {
+            std::fs::write(dir.join(format!("{me}.json")), format!(r#"{{"pid":{me},"sessionId":"a","name":"me","procStart":"{}"}}"#, started + 1)).unwrap();
+            files.clear();
+            assert!(poll(&dir, &mut files).is_empty());
+            std::fs::write(dir.join(format!("{me}.json")), format!(r#"{{"pid":{me},"sessionId":"a","name":"me","procStart":"{started}"}}"#)).unwrap();
+            files.clear();
+            assert_eq!(poll(&dir, &mut files).len(), 1);
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 }
