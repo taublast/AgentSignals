@@ -877,11 +877,13 @@ mod ax {
     }
 }
 
-/// The process's start time in Claude Code's `procStart` unit; not read on macOS yet, so a session
-/// file counts as live while its PID runs.
-// ponytail: macOS unit of procStart unverified; read kinfo_proc p_starttime once it is known.
-pub fn process_started(_pid: u32) -> Option<u64> {
-    None
+/// When the process started, epoch ms (the kernel's BSD info of the process).
+pub fn process_started_ms(pid: u32) -> Option<u64> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: the buffer is a proc_bsdinfo of the size passed; the call fills at most that.
+    let got = unsafe { libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
+    (got == size).then(|| info.pbi_start_tvsec * 1_000 + info.pbi_start_tvusec / 1_000)
 }
 
 /// Asking after a process without starting one: this runs for every session twice a second.

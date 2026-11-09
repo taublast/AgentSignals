@@ -478,9 +478,13 @@ pub fn set_topmost(on: bool) {
     }
 }
 
-/// When the process started, as a FILETIME (100 ns steps since 1601, UTC): what Claude Code writes as
-/// `procStart` in a session file on Windows.
-pub fn process_started(pid: u32) -> Option<u64> {
+/// When the process started, epoch ms.
+pub fn process_started_ms(pid: u32) -> Option<u64> {
+    // A FILETIME counts 100 ns steps since 1601; 1970 is 11 644 473 600 s later.
+    process_filetime(pid).and_then(|t| (t / 10_000).checked_sub(11_644_473_600_000))
+}
+
+fn process_filetime(pid: u32) -> Option<u64> {
     use windows::Win32::Foundation::FILETIME;
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
