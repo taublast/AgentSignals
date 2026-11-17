@@ -247,23 +247,27 @@ fn tabs() -> Result<Vec<Tab>> {
 tell application "Terminal"
     set out to ""
     repeat with i from 1 to count of windows
-        set wid to id of window i
-        repeat with t from 1 to count of tabs of window i
-            try
-                set tb to tab t of window i
+        -- A window that answers no id or tabs (one closing right now, one that is not a terminal
+        -- window) is skipped: one such window must not hide every tab of the others.
+        try
+            set wid to id of window i
+            repeat with t from 1 to count of tabs of window i
                 try
-                    set ct to custom title of tb
-                on error
-                    set ct to ""
+                    set tb to tab t of window i
+                    try
+                        set ct to custom title of tb
+                    on error
+                        set ct to ""
+                    end try
+                    try
+                        set tt to tty of tb
+                    on error
+                        set tt to ""
+                    end try
+                    set out to out & i & "{f}" & wid & "{f}" & t & "{f}" & ct & "{f}" & tt & "{r}"
                 end try
-                try
-                    set tt to tty of tb
-                on error
-                    set tt to ""
-                end try
-                set out to out & i & "{f}" & wid & "{f}" & t & "{f}" & ct & "{f}" & tt & "{r}"
-            end try
-        end repeat
+            end repeat
+        end try
     end repeat
     return out
 end tell"#,
