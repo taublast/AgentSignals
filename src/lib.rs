@@ -1503,16 +1503,23 @@ fn menu_panel() -> Build<SkiaShape> {
                     signal_item(Signal::Toast),
                     signal_item(Signal::Flash),
                     menu_item("🎨", tr("Tint"), open_palette),
-                    // A terminal tab only: a VS Code panel is closed in VS Code.
+                    // A terminal tab only: a VS Code panel is closed in VS Code, a background job is
+                    // stopped instead.
                     menu_item("❌", tr("Close session"), |app, _cx| {
                         if let Some(m) = &mut app.menu {
                             m.confirm = true;
                         }
                     })
                     .observe(|me, app: &App| {
-                        let vscode = app.menu.as_ref().is_some_and(|m| app.sessions.iter().any(|s| s.vscode && s.name == m.name));
-                        me.set_is_visible(!vscode);
+                        let elsewhere = app.menu.as_ref().is_some_and(|m| app.sessions.iter().any(|s| (s.vscode || s.background) && s.name == m.name));
+                        me.set_is_visible(!elsewhere);
                     }),
+                    menu_item("⏹", tr("Stop job"), |app, _cx| {
+                        if let Some(m) = &mut app.menu {
+                            m.confirm = true;
+                        }
+                    })
+                    .observe(|me, app: &App| me.set_is_visible(menu_is_background(app))),
                 )),
                 // A closed session.
                 SkiaStack::new().accessibility_role(Aria::MENU).observe(|me, app: &App| {
@@ -1542,20 +1549,28 @@ fn menu_panel() -> Build<SkiaShape> {
                     .spacing(10)
                     .observe(|me, app: &App| me.set_is_visible(app.menu.as_ref().is_some_and(|m| m.confirm)))
                     .accessibility_role(Aria::ALERT_DIALOG)
-                    .accessibility_label(tr("Close session"))
+                    .observe(|me, app: &App| me.set_accessibility_label(if menu_is_background(app) { tr("Stop job") } else { tr("Close session") }.to_string()))
                     .children((
                         label("", 13).accessibility_role(Aria::TEXT).observe(|me, app: &App| {
                             if let Some(m) = &app.menu {
-                                me.set_text(trf("Close the terminal tab of {name}? It stays in the list: click it to reopen.", &[("name", &m.name)]));
+                                me.set_text(if menu_is_background(app) {
+                                    trf("Stop the background job of {name}? Its conversation ends there.", &[("name", &m.name)])
+                                } else {
+                                    trf("Close the terminal tab of {name}? It stays in the list: click it to reopen.", &[("name", &m.name)])
+                                });
                             }
                         }),
                         SkiaRow::new().spacing(8).children((
-                            button(tr("Close tab"), pal().danger).width_request(100).on_tapped(|_me, app: &mut App, cx| {
-                                if let Some(m) = app.menu.take() {
-                                    let _ = app.tx.send(Cmd::CloseTab(m.name));
-                                }
-                                menu_done(app, cx);
-                            }),
+                            button(tr("Close tab"), pal().danger)
+                                .width_request(100)
+                                .observe(|me, app: &App| me.set_text(if menu_is_background(app) { tr("Stop job") } else { tr("Close tab") }))
+                                .on_tapped(|_me, app: &mut App, cx| {
+                                    let background = menu_is_background(app);
+                                    if let Some(m) = app.menu.take() {
+                                        let _ = app.tx.send(if background { Cmd::StopJob(m.name) } else { Cmd::CloseTab(m.name) });
+                                    }
+                                    menu_done(app, cx);
+                                }),
                             button(tr("Cancel"), pal().border).width_request(100).on_tapped(|_me, app: &mut App, cx| {
                                 app.menu = None;
                                 menu_done(app, cx);
@@ -1675,9 +1690,22 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                 _ if app.unseen.contains(&s.id) => tr("finished").into(),
                 _ => tr("idle").into(),
             };
-            let place = if s.vscode { format!(", {}", tr("in VS Code")) } else { String::new() };
+            let place = if s.vscode {
+                format!(", {}", tr("in VS Code"))
+            } else if s.background {
+                format!(", {}", tr("in the background"))
+            } else {
+                String::new()
+            };
             me.set_accessibility_label(format!("{}, {status}{place}", s.name));
-            me.set_accessibility_hint(if s.vscode { tr("Brings its VS Code window to the front") } else { tr("Brings its terminal tab to the front") }.to_string());
+            let hint = if s.vscode {
+                tr("Brings its VS Code window to the front")
+            } else if s.background {
+                tr("Runs in the background, without a window; its menu can stop it")
+            } else {
+                tr("Brings its terminal tab to the front")
+            };
+            me.set_accessibility_hint(hint.to_string());
         })
         .on_hovered(move |me, app: &mut App, _cx, on| {
             app.hovered = on.then(|| format!("p{pid}"));
@@ -1720,14 +1748,16 @@ fn session_row(pid: u32, name: String) -> Build<SkiaShape> {
                         let icons = state::rule_icons(&app.rules, &name);
                         me.set_text(if icons.is_empty() { name.clone() } else { format!("{name}  {icons}") });
                     }),
-                    // Runs in VS Code, not in a terminal.
+                    // Runs in VS Code, or as a background job, not in a terminal.
                     SkiaShape::new()
                         .corner_radius(4)
                         .background_color(hex(pal().border))
                         .padding((5, 1, 5, 1))
                         .vertical_options(LayoutOptions::Center)
-                        .observe(move |me, app: &App| me.set_is_visible(app.session(pid).is_some_and(|s| s.vscode)))
-                        .children((label("VSC", 10).text_color(hex(pal().text_body)),)),
+                        .observe(move |me, app: &App| me.set_is_visible(app.session(pid).is_some_and(|s| s.vscode || s.background)))
+                        .children((label("", 10).text_color(hex(pal().text_body)).observe(move |me, app: &App| {
+                            me.set_text(if app.session(pid).is_some_and(|s| s.background) { "BG" } else { "VSC" });
+                        }),)),
                 )),
                 label("", 12).text_color(hex(pal().text_soft)).max_lines(2).observe(move |me, app: &App| {
                     let Some(s) = app.session(pid) else { return };
@@ -1869,6 +1899,7 @@ fn show_notice(app: &App, cx: &mut Cx, notice: &state::Notice) {
     let text = match notice {
         state::Notice::NoEditor => tr("No running VS Code detected.").to_string(),
         state::Notice::NoTab => tr("Its terminal tab was not found.").to_string(),
+        state::Notice::Background => tr("It runs in the background, without a window.").to_string(),
         state::Notice::Failed(why) => trf("That did not work: {why}", &[("why", why)]),
     };
     // A surface of its own, lighter than the page with a line on top, so it is seen rising from the
@@ -1884,6 +1915,11 @@ fn show_notice(app: &App, cx: &mut Cx, notice: &state::Notice) {
             .accessibility_label(text.clone()),
     ));
     cx.show_toast_content(app.shell, toast, 3500.0);
+}
+
+/// The open menu belongs to a background job.
+fn menu_is_background(app: &App) -> bool {
+    app.menu.as_ref().is_some_and(|m| m.closed.is_none() && app.sessions.iter().any(|s| s.background && s.name == m.name))
 }
 
 /// Copies the shared state when it changed; rebuilds the rows whose list changed.

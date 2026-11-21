@@ -11,7 +11,7 @@ use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
 use windows::Win32::Media::Speech::{ISpVoice, SPF_ASYNC, SPF_IS_FILENAME, SPF_IS_NOT_XML, SpVoice};
 use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW};
-use windows::Win32::System::Threading::{GetCurrentProcessId, GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows::Win32::System::Threading::{GetCurrentProcessId, GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, TerminateProcess};
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationInvokePattern, IUIAutomationSelectionItemPattern, TreeScope_Descendants,
     UIA_InvokePatternId, UIA_SelectionItemPatternId, UIA_TabItemControlTypeId,
@@ -495,6 +495,16 @@ fn process_filetime(pid: u32) -> Option<u64> {
     }
 }
 
+/// Ends a process (a background job the user chose to stop).
+pub fn end_process(pid: u32) -> Result<()> {
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, false, pid).map_err(msg)?;
+        let ended = TerminateProcess(handle, 1).map_err(msg);
+        let _ = CloseHandle(handle);
+        ended
+    }
+}
+
 pub fn pid_alive(pid: u32) -> bool {
     const STILL_ACTIVE: u32 = 259;
     unsafe {
@@ -510,6 +520,16 @@ pub fn pid_alive(pid: u32) -> bool {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// Stop job ends the process.
+    #[test]
+    fn ends_a_process() {
+        let mut child = std::process::Command::new("ping").args(["-n", "30", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn().unwrap();
+        assert!(pid_alive(child.id()));
+        end_process(child.id()).unwrap();
+        let _ = child.wait();
+        assert!(!pid_alive(child.id()));
+    }
 
     #[test]
     fn terminal_command() {

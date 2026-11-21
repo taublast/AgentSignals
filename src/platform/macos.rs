@@ -890,6 +890,14 @@ pub fn process_started_ms(pid: u32) -> Option<u64> {
     (got == size).then(|| info.pbi_start_tvsec * 1_000 + info.pbi_start_tvusec / 1_000)
 }
 
+/// Ends a process (a background job the user chose to stop): asked to quit, as `kill` does.
+pub fn end_process(pid: u32) -> Result<()> {
+    if pid == 0 || unsafe { libc::kill(pid as i32, libc::SIGTERM) } != 0 {
+        return Err(format!("could not stop process {pid}: {}", std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
 /// Asking after a process without starting one: this runs for every session twice a second.
 /// Signal 0 only checks; a process of another user answers "not allowed", which means it is there.
 pub fn pid_alive(pid: u32) -> bool {

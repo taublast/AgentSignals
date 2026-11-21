@@ -17,6 +17,8 @@ pub enum Cmd {
     Focus(String),
     /// Close the session's terminal tab (confirmed in the UI).
     CloseTab(String),
+    /// End a background job no terminal tab shows (confirmed in the UI).
+    StopJob(String),
     Topmost(bool),
     /// The window's title bar in the app's theme: dark or light, `None` as the system's.
     TitleBar(Option<bool>),
@@ -254,6 +256,21 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<
                 fired,
             });
         }
+        Cmd::Focus(name) if shared.lock().unwrap().sessions.iter().any(|s| s.background && s.name.eq_ignore_ascii_case(&name)) => {
+            shared.lock().unwrap().notice = Some(Notice::Background);
+        }
+        Cmd::StopJob(name) => {
+            let pid = shared.lock().unwrap().sessions.iter().find(|s| s.background && s.name.eq_ignore_ascii_case(&name)).map(|s| s.pid);
+            let Some(pid) = pid else { return };
+            let fired = match platform::end_process(pid) {
+                Ok(()) => "done".to_string(),
+                Err(e) => {
+                    shared.lock().unwrap().notice = Some(Notice::Failed(e.clone()));
+                    e
+                }
+            };
+            shared.lock().unwrap().log(Event { at_ms: state::now_ms(), pid, session: name, kind: "stop".into(), busy_ms: 0, fired });
+        }
         Cmd::Focus(name) => {
             // Asked for by the user (a row or a notification): seen, also where the tab in front
             // cannot be read.
@@ -406,7 +423,7 @@ type Parsed = Option<FileInfo>;
 /// Claude Code wrote `startedAt` (a second of slack for clock rounding).
 fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Parsed)>) -> HashMap<u32, Session> {
     let mut seen = HashMap::new();
-    let mut jobs: HashMap<String, (String, String, u64)> = HashMap::new();
+    let mut jobs: HashMap<String, ((String, String, u64), Session)> = HashMap::new();
     let mut parked = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else { return seen };
     let mut present = Vec::new();
@@ -433,8 +450,8 @@ fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Parsed)>) -> Ha
         if !same_process || !platform::pid_alive(file.pid) {
             continue;
         }
-        if let Some(job) = &file.job {
-            jobs.insert(job.clone(), file.state.clone());
+        if let (Some(job), Some(s)) = (&file.job, file.job_session) {
+            jobs.insert(job.clone(), (file.state.clone(), s));
         }
         if let Some(s) = file.session {
             parked.push((s.pid, file.parked));
@@ -444,10 +461,19 @@ fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Parsed)>) -> Ha
     // A terminal session that handed its conversation to a background job (`/background`) stops
     // updating its own status: the job's status is the conversation's. Once the job has ended, the
     // conversation is no longer working.
+    let mut shown = std::collections::HashSet::new();
     for (pid, job) in parked {
         let (Some(job), Some(s)) = (job, seen.get_mut(&pid)) else { continue };
-        let (status, waiting_for, since_ms) = jobs.get(&job).cloned().unwrap_or_else(|| ("idle".into(), String::new(), s.since_ms));
+        let (status, waiting_for, since_ms) = jobs.get(&job).map(|(state, _)| state.clone()).unwrap_or_else(|| ("idle".into(), String::new(), s.since_ms));
         (s.status, s.waiting_for, s.since_ms) = (status, waiting_for, since_ms);
+        shown.insert(job);
+    }
+    // A job no terminal tab shows (its tab was closed) still runs and uses resources: it gets a row
+    // of its own, so it can be seen and stopped.
+    for (job, (_, s)) in jobs {
+        if !shown.contains(&job) {
+            seen.insert(s.pid, s);
+        }
     }
     files.retain(|p, _| present.contains(p));
     seen
@@ -463,6 +489,8 @@ struct FileInfo {
     session: Option<Session>,
     parked: Option<String>,
     job: Option<String>,
+    /// The job's own row, for when no terminal tab shows it.
+    job_session: Option<Session>,
     state: (String, String, u64),
 }
 
@@ -475,6 +503,7 @@ fn read_file(v: &Value) -> Option<FileInfo> {
         session: parse(v),
         parked: text("parkedJobId"),
         job: (text("kind").as_deref() == Some("bg")).then(|| text("jobId")).flatten(),
+        job_session: job_session(v),
         state: (status_of(v), text("waitingFor").unwrap_or_default(), v.get("statusUpdatedAt").and_then(Value::as_u64).unwrap_or(0)),
     })
 }
@@ -505,6 +534,18 @@ fn parse(v: &Value) -> Option<Session> {
     if !terminal && !(kind_ok && vscode) {
         return None;
     }
+    Some(session_of(v, pid, false))
+}
+
+/// A background job's session (kind `bg` with a `jobId`), listed only while no terminal tab shows it.
+fn job_session(v: &Value) -> Option<Session> {
+    let pid = v.get("pid")?.as_u64()? as u32;
+    let is_job = v.get("kind").and_then(Value::as_str) == Some("bg") && v.get("jobId").and_then(Value::as_str).is_some_and(|j| !j.is_empty());
+    is_job.then(|| session_of(v, pid, true))
+}
+
+fn session_of(v: &Value, pid: u32, background: bool) -> Session {
+    let text = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let cwd = text("cwd");
     let mut name = text("name");
     if name.is_empty() {
@@ -520,7 +561,7 @@ fn parse(v: &Value) -> Option<Session> {
             (None, ai) => title = ai.unwrap_or_default(),
         }
     }
-    Some(Session {
+    Session {
         pid,
         id: text("sessionId"),
         name,
@@ -529,13 +570,14 @@ fn parse(v: &Value) -> Option<Session> {
         // also `interactive`, but with entrypoint `sdk-cli`.
         interactive: matches!(text("kind").as_str(), "interactive" | "") && matches!(text("entrypoint").as_str(), "cli" | ""),
         vscode: text("entrypoint") == "claude-vscode",
+        background,
         title,
         remote: text("bridgeSessionId"),
         status: status_of(v),
         waiting_for: text("waitingFor"),
         cwd,
         since_ms: v.get("statusUpdatedAt").and_then(Value::as_u64).unwrap_or(0),
-    })
+    }
 }
 
 /// A session's titles from the end of its transcript: the custom title (`/rename`, which is its
@@ -653,6 +695,14 @@ mod tests {
         let live = poll(&dir, &mut files);
         assert_eq!(live.len(), 1);
         assert_eq!((live[&me].status.as_str(), live[&me].waiting_for.as_str(), live[&me].since_ms), ("waiting", "input needed", 7));
+        assert!(!live[&me].background);
+        // The terminal tab closed, the job runs on: the job gets a row of its own, marked background.
+        let terminal = std::fs::read(dir.join(format!("{me}.json"))).unwrap();
+        std::fs::remove_file(dir.join(format!("{me}.json"))).unwrap();
+        files.clear();
+        let live = poll(&dir, &mut files);
+        assert!(live.len() == 1 && live[&me].background && live[&me].status == "waiting" && !live[&me].interactive);
+        std::fs::write(dir.join(format!("{me}.json")), terminal).unwrap();
         std::fs::remove_file(dir.join("job.json")).unwrap();
         files.clear();
         assert_eq!(poll(&dir, &mut files)[&me].status, "idle");

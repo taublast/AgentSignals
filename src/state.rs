@@ -23,6 +23,9 @@ pub struct Session {
     /// Runs in the Claude Code panel of VS Code (entrypoint `claude-vscode`): no terminal tab, a
     /// click brings its VS Code window to the front instead.
     pub vscode: bool,
+    /// A background job (kind `bg`) no terminal tab shows any more: nothing to bring forward, it
+    /// can only be stopped.
+    pub background: bool,
     /// What its terminal tab shows when it has no name of its own (custom or AI title).
     pub title: String,
     /// Its Remote Control session id (claude.ai/code), when Remote Control is on.
@@ -115,6 +118,8 @@ pub enum Notice {
     NoEditor,
     /// A terminal session whose tab was not found.
     NoTab,
+    /// A background job: it has no window to bring forward.
+    Background,
     /// The system refused or failed, in its own words.
     Failed(String),
 }
@@ -540,7 +545,7 @@ mod tests {
     use super::*;
 
     fn s(pid: u32, status: &str, since_ms: u64) -> Session {
-        Session { pid, id: String::new(), name: format!("s{pid}"), named: true, interactive: true, vscode: false, title: String::new(), remote: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms }
+        Session { pid, id: String::new(), name: format!("s{pid}"), named: true, interactive: true, vscode: false, background: false, title: String::new(), remote: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms }
     }
 
     fn map(list: &[Session]) -> HashMap<u32, Session> {
