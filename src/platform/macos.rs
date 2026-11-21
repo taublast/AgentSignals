@@ -890,11 +890,18 @@ pub fn process_started_ms(pid: u32) -> Option<u64> {
     (got == size).then(|| info.pbi_start_tvsec * 1_000 + info.pbi_start_tvusec / 1_000)
 }
 
-/// Ends a process (a background job the user chose to stop): asked to quit, as `kill` does.
+/// Ends a process (a background job the user chose to stop): asked to quit first, as `kill` does.
 pub fn end_process(pid: u32) -> Result<()> {
     if pid == 0 || unsafe { libc::kill(pid as i32, libc::SIGTERM) } != 0 {
         return Err(format!("could not stop process {pid}: {}", std::io::Error::last_os_error()));
     }
+    // One that ignores the request is ended outright a few seconds later, as Windows does at once.
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        if pid_alive(pid) {
+            unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        }
+    });
     Ok(())
 }
 
