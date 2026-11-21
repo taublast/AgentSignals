@@ -76,7 +76,7 @@ fn run(shared: Shared, rx: Receiver<Cmd>, tx: Sender<Cmd>) {
         }
         next_poll = Instant::now() + POLL;
         let now = state::now_ms();
-        let mut new = poll(&dir, &mut files);
+        let mut new = poll(&dir, &mut files, |id| crate::restore::transcript(id).is_some());
         // A turn that is over is not work, though a background shell runs; one that ended with a
         // question waits for the user.
         if shared.lock().unwrap().detect_questions {
@@ -421,7 +421,7 @@ type Parsed = Option<FileInfo>;
 /// that ended without removing it (a restart, a crash) can name a PID the system has since given to
 /// another program, which started after the session did: the session's own process started before
 /// Claude Code wrote `startedAt` (a second of slack for clock rounding).
-fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Parsed)>) -> HashMap<u32, Session> {
+fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Parsed)>, has_transcript: impl Fn(&str) -> bool) -> HashMap<u32, Session> {
     let mut seen = HashMap::new();
     let mut jobs: HashMap<String, ((String, String, u64), Session)> = HashMap::new();
     let mut parked = Vec::new();
@@ -469,9 +469,10 @@ fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Parsed)>) -> Ha
         shown.insert(job);
     }
     // A job no terminal tab shows (its tab was closed) still runs and uses resources: it gets a row
-    // of its own, so it can be seen and stopped.
+    // of its own, so it can be seen and stopped. One that never had a message (an empty agent
+    // Claude Code keeps ready, no transcript yet) is not a conversation and is not listed.
     for (job, (_, s)) in jobs {
-        if !shown.contains(&job) {
+        if !shown.contains(&job) && has_transcript(&s.id) {
             seen.insert(s.pid, s);
         }
     }
@@ -667,7 +668,7 @@ mod tests {
     fn sessions_folder() {
         let mut files = HashMap::new();
         let dir = std::env::temp_dir().join(format!("agentsignals-test-{}-sessions", std::process::id()));
-        assert!(poll(&dir, &mut files).is_empty());
+        assert!(poll(&dir, &mut files, |_| true).is_empty());
         std::fs::create_dir_all(&dir).unwrap();
         let me = std::process::id();
         std::fs::write(dir.join(format!("{me}.json")), format!(r#"{{"pid":{me},"sessionId":"a","name":"me","nameSource":"user"}}"#)).unwrap();
@@ -675,7 +676,7 @@ mod tests {
         std::fs::write(dir.join("notes.txt"), "hello").unwrap();
         // A file of a process that ended.
         std::fs::write(dir.join("4000000.json"), r#"{"pid":4000000,"sessionId":"z","name":"gone"}"#).unwrap();
-        let live = poll(&dir, &mut files);
+        let live = poll(&dir, &mut files, |_| true);
         assert_eq!(live.len(), 1);
         assert_eq!(live[&me].name, "me");
         // A session that started before this process did is an old file whose PID was reused: not
@@ -683,16 +684,16 @@ mod tests {
         let started = platform::process_started_ms(me).expect("this process's start time");
         std::fs::write(dir.join(format!("{me}.json")), format!(r#"{{"pid":{me},"sessionId":"a","name":"me","startedAt":{}}}"#, started - 60_000)).unwrap();
         files.clear();
-        assert!(poll(&dir, &mut files).is_empty());
+        assert!(poll(&dir, &mut files, |_| true).is_empty());
         std::fs::write(dir.join(format!("{me}.json")), format!(r#"{{"pid":{me},"sessionId":"a","name":"me","startedAt":{}}}"#, started + 300)).unwrap();
         files.clear();
-        assert_eq!(poll(&dir, &mut files).len(), 1);
+        assert_eq!(poll(&dir, &mut files, |_| true).len(), 1);
         // A terminal session that handed its conversation to a background job shows the job's
         // status, not its own last one; the job itself is not listed. Without the job: idle.
         std::fs::write(dir.join(format!("{me}.json")), format!(r#"{{"pid":{me},"sessionId":"a","name":"me","status":"busy","parkedJobId":"j1"}}"#)).unwrap();
         std::fs::write(dir.join("job.json"), format!(r#"{{"pid":{me},"sessionId":"b","name":"me","kind":"bg","jobId":"j1","status":"waiting","waitingFor":"input needed","statusUpdatedAt":7}}"#)).unwrap();
         files.clear();
-        let live = poll(&dir, &mut files);
+        let live = poll(&dir, &mut files, |_| true);
         assert_eq!(live.len(), 1);
         assert_eq!((live[&me].status.as_str(), live[&me].waiting_for.as_str(), live[&me].since_ms), ("waiting", "input needed", 7));
         assert!(!live[&me].background);
@@ -700,12 +701,13 @@ mod tests {
         let terminal = std::fs::read(dir.join(format!("{me}.json"))).unwrap();
         std::fs::remove_file(dir.join(format!("{me}.json"))).unwrap();
         files.clear();
-        let live = poll(&dir, &mut files);
+        assert!(poll(&dir, &mut files, |_| false).is_empty(), "a job that never had a message is not listed");
+        let live = poll(&dir, &mut files, |_| true);
         assert!(live.len() == 1 && live[&me].background && live[&me].status == "waiting" && !live[&me].interactive);
         std::fs::write(dir.join(format!("{me}.json")), terminal).unwrap();
         std::fs::remove_file(dir.join("job.json")).unwrap();
         files.clear();
-        assert_eq!(poll(&dir, &mut files)[&me].status, "idle");
+        assert_eq!(poll(&dir, &mut files, |_| true)[&me].status, "idle");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
