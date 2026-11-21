@@ -264,11 +264,20 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<
                     st.version += 1;
                 }
             }
-            let editor = shared.lock().unwrap().sessions.iter().find(|s| s.vscode && s.name.eq_ignore_ascii_case(&name)).map(|s| s.cwd.clone());
+            let editor = shared.lock().unwrap().sessions.iter().find(|s| s.vscode && s.name.eq_ignore_ascii_case(&name)).map(|s| (s.cwd.clone(), s.id.clone()));
             match editor {
-                Some(cwd) => {
+                Some((cwd, id)) => {
                     let (fired, notice) = match platform::focus_editor(&cwd) {
-                        Ok(true) => ("done".into(), None),
+                        Ok(true) => {
+                            // The window has the session's folder, but may show another of its
+                            // sessions: the Claude Code extension's own link switches that window to
+                            // this session's tab. Only after the window came forward, so the link
+                            // lands in it and never starts VS Code or a new conversation elsewhere.
+                            if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+                                platform::open_url(&format!("vscode://anthropic.claude-code/open?session={id}"));
+                            }
+                            ("done".into(), None)
+                        }
                         Ok(false) => ("no VS Code window with that folder".into(), Some(Notice::NoEditor)),
                         Err(e) => (e.clone(), Some(Notice::Failed(e))),
                     };
