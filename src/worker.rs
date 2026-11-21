@@ -442,6 +442,15 @@ fn parse(v: &Value) -> Option<Session> {
         return None;
     }
     let text = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    // Only sessions a click can bring forward are listed: one in a terminal (kind `interactive`,
+    // entrypoint `cli`) or in VS Code's panel. A background job (kind `bg`, run by Claude Code's
+    // own service with no window) and a one-shot `-p` run (entrypoint `sdk-cli`) are not.
+    let kind_ok = matches!(text("kind").as_str(), "interactive" | "");
+    let vscode = text("entrypoint") == "claude-vscode";
+    let terminal = kind_ok && matches!(text("entrypoint").as_str(), "cli" | "");
+    if !terminal && !(kind_ok && vscode) {
+        return None;
+    }
     let cwd = text("cwd");
     let mut name = text("name");
     if name.is_empty() {
@@ -530,10 +539,10 @@ mod tests {
         let s = session(r#"{"pid":1,"sessionId":"a","cwd":"C:\\Work\\shop","name":"api","nameSource":"user","kind":"interactive","entrypoint":"cli","status":"shell","statusUpdatedAt":5}"#).unwrap();
         assert!(s.interactive && s.named);
         assert_eq!((s.name.as_str(), s.status.as_str(), s.since_ms), ("api", "busy", 5));
-        // A background job and a one-shot `-p` run are listed, never remembered for reopening.
-        assert!(!session(r#"{"pid":2,"sessionId":"b","kind":"bg","entrypoint":"cli","name":"job"}"#).unwrap().interactive);
+        // A background job and a one-shot `-p` run have no window to bring forward: not listed.
+        assert!(session(r#"{"pid":2,"sessionId":"b","kind":"bg","entrypoint":"cli","name":"job"}"#).is_none());
         assert!(session(r#"{"pid":4,"sessionId":"d","kind":"bg","entrypoint":"cli","name":"d","spare":true}"#).is_none());
-        assert!(!session(r#"{"pid":3,"sessionId":"c","kind":"interactive","entrypoint":"sdk-cli"}"#).unwrap().interactive);
+        assert!(session(r#"{"pid":3,"sessionId":"c","kind":"interactive","entrypoint":"sdk-cli"}"#).is_none());
         // VS Code's Claude Code panel: listed, no terminal tab, never reopened in a terminal.
         let vs = session(r#"{"pid":5,"sessionId":"e","kind":"interactive","entrypoint":"claude-vscode","name":"e"}"#).unwrap();
         assert!(vs.vscode && !vs.interactive && !s.vscode);
