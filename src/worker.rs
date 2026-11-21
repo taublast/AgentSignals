@@ -397,8 +397,8 @@ pub fn sound_names() -> Vec<String> {
     names
 }
 
-/// A session file as read: the session and when it started (`startedAt`, epoch ms), if it says.
-type Parsed = Option<(Session, Option<u64>)>;
+/// A session file as read, kept until the file changes.
+type Parsed = Option<FileInfo>;
 
 /// The live sessions: `<pid>.json` files whose process still runs. A file left behind by a session
 /// that ended without removing it (a restart, a crash) can name a PID the system has since given to
@@ -406,6 +406,8 @@ type Parsed = Option<(Session, Option<u64>)>;
 /// Claude Code wrote `startedAt` (a second of slack for clock rounding).
 fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Parsed)>) -> HashMap<u32, Session> {
     let mut seen = HashMap::new();
+    let mut jobs: HashMap<String, (String, String, u64)> = HashMap::new();
+    let mut parked = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else { return seen };
     let mut present = Vec::new();
     for entry in entries.flatten() {
@@ -418,25 +420,73 @@ fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Parsed)>) -> Ha
         let parsed = match files.get(&path) {
             Some((m, s)) if *m == modified => s.clone(),
             _ => {
-                let s = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| {
-                    let started = v.get("startedAt").and_then(Value::as_u64);
-                    parse(&v).map(|s| (s, started))
-                });
+                let s = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| read_file(&v));
                 files.insert(path.clone(), (modified, s.clone()));
                 s
             }
         };
-        let Some((s, started)) = parsed else { continue };
-        let same_process = match (started, platform::process_started_ms(s.pid)) {
+        let Some(file) = parsed else { continue };
+        let same_process = match (file.started, platform::process_started_ms(file.pid)) {
             (Some(session), Some(process)) => process <= session + 1_000,
             _ => true,
         };
-        if same_process && platform::pid_alive(s.pid) {
+        if !same_process || !platform::pid_alive(file.pid) {
+            continue;
+        }
+        if let Some(job) = &file.job {
+            jobs.insert(job.clone(), file.state.clone());
+        }
+        if let Some(s) = file.session {
+            parked.push((s.pid, file.parked));
             seen.insert(s.pid, s);
         }
     }
+    // A terminal session that handed its conversation to a background job (`/background`) stops
+    // updating its own status: the job's status is the conversation's. Once the job has ended, the
+    // conversation is no longer working.
+    for (pid, job) in parked {
+        let (Some(job), Some(s)) = (job, seen.get_mut(&pid)) else { continue };
+        let (status, waiting_for, since_ms) = jobs.get(&job).cloned().unwrap_or_else(|| ("idle".into(), String::new(), s.since_ms));
+        (s.status, s.waiting_for, s.since_ms) = (status, waiting_for, since_ms);
+    }
     files.retain(|p, _| present.contains(p));
     seen
+}
+
+/// What one session file says: the listed session (none for a background job or a `-p` run), its
+/// process, the background job it handed its conversation to (`parkedJobId`), the job it is
+/// (`jobId`), and its own status, waiting reason and since when.
+#[derive(Clone)]
+struct FileInfo {
+    pid: u32,
+    started: Option<u64>,
+    session: Option<Session>,
+    parked: Option<String>,
+    job: Option<String>,
+    state: (String, String, u64),
+}
+
+fn read_file(v: &Value) -> Option<FileInfo> {
+    let pid = v.get("pid")?.as_u64()? as u32;
+    let text = |k: &str| v.get(k).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string);
+    Some(FileInfo {
+        pid,
+        started: v.get("startedAt").and_then(Value::as_u64),
+        session: parse(v),
+        parked: text("parkedJobId"),
+        job: (text("kind").as_deref() == Some("bg")).then(|| text("jobId")).flatten(),
+        state: (status_of(v), text("waitingFor").unwrap_or_default(), v.get("statusUpdatedAt").and_then(Value::as_u64).unwrap_or(0)),
+    })
+}
+
+/// Claude Code's statuses: busy, shell (running a shell command, which its own UI shows as
+/// working), idle, waiting.
+fn status_of(v: &Value) -> String {
+    match v.get("status").and_then(Value::as_str).unwrap_or("idle") {
+        "shell" => "busy",
+        s => s,
+    }
+    .to_string()
 }
 
 fn parse(v: &Value) -> Option<Session> {
@@ -481,13 +531,7 @@ fn parse(v: &Value) -> Option<Session> {
         vscode: text("entrypoint") == "claude-vscode",
         title,
         remote: text("bridgeSessionId"),
-        // Claude Code's statuses: busy, shell (running a shell command, which its own UI shows as
-        // working), idle, waiting.
-        status: match v.get("status").and_then(Value::as_str).unwrap_or("idle") {
-            "shell" => "busy",
-            s => s,
-        }
-        .to_string(),
+        status: status_of(v),
         waiting_for: text("waitingFor"),
         cwd,
         since_ms: v.get("statusUpdatedAt").and_then(Value::as_u64).unwrap_or(0),
@@ -601,6 +645,17 @@ mod tests {
         std::fs::write(dir.join(format!("{me}.json")), format!(r#"{{"pid":{me},"sessionId":"a","name":"me","startedAt":{}}}"#, started + 300)).unwrap();
         files.clear();
         assert_eq!(poll(&dir, &mut files).len(), 1);
+        // A terminal session that handed its conversation to a background job shows the job's
+        // status, not its own last one; the job itself is not listed. Without the job: idle.
+        std::fs::write(dir.join(format!("{me}.json")), format!(r#"{{"pid":{me},"sessionId":"a","name":"me","status":"busy","parkedJobId":"j1"}}"#)).unwrap();
+        std::fs::write(dir.join("job.json"), format!(r#"{{"pid":{me},"sessionId":"b","name":"me","kind":"bg","jobId":"j1","status":"waiting","waitingFor":"input needed","statusUpdatedAt":7}}"#)).unwrap();
+        files.clear();
+        let live = poll(&dir, &mut files);
+        assert_eq!(live.len(), 1);
+        assert_eq!((live[&me].status.as_str(), live[&me].waiting_for.as_str(), live[&me].since_ms), ("waiting", "input needed", 7));
+        std::fs::remove_file(dir.join("job.json")).unwrap();
+        files.clear();
+        assert_eq!(poll(&dir, &mut files)[&me].status, "idle");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
