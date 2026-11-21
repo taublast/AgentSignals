@@ -1871,13 +1871,18 @@ fn show_notice(app: &App, cx: &mut Cx, notice: &state::Notice) {
         state::Notice::NoTab => tr("Its terminal tab was not found.").to_string(),
         state::Notice::Failed(why) => trf("That did not work: {why}", &[("why", why)]),
     };
-    let toast = label(&text, 14)
-        .text_color(Color::WHITE)
-        .margin((16, 12, 16, 14))
-        .fill_x()
-        .accessibility_role(Aria::STATUS)
-        .accessibility_live(Aria::LIVE_POLITE)
-        .accessibility_label(text.clone());
+    // A surface of its own, lighter than the page with a line on top, so it is seen rising from the
+    // bottom edge; the shell's default dark toast disappears against the dark theme.
+    let toast = SkiaStack::new().fill_x().spacing(0).background_color(hex(pal().panel)).children((
+        SkiaShape::new().fill_x().height_request(1).background_color(hex(pal().border)),
+        label(&text, 14)
+            .text_color(hex(pal().text))
+            .margin((16, 12, 16, 14))
+            .fill_x()
+            .accessibility_role(Aria::STATUS)
+            .accessibility_live(Aria::LIVE_POLITE)
+            .accessibility_label(text.clone()),
+    ));
     cx.show_toast_content(app.shell, toast, 3500.0);
 }
 
