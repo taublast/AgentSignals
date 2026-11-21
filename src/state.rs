@@ -360,7 +360,14 @@ fn settings_path() -> PathBuf {
 
 /// A terminal tab title is `<marker> <session name>` (`✳ idle`, `◐ busy`...).
 pub fn tab_is(title: &str, name: &str) -> bool {
-    title.trim_start_matches(|c: char| !c.is_alphanumeric()).trim().eq_ignore_ascii_case(name)
+    let title = title.trim_start_matches(|c: char| !c.is_alphanumeric()).trim();
+    // Claude Code numbers a tab whose name another live session already has: "api-server (2)".
+    let unnumbered = title
+        .strip_suffix(')')
+        .and_then(|t| t.rsplit_once(" ("))
+        .filter(|(_, n)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+        .map(|(t, _)| t);
+    title.eq_ignore_ascii_case(name) || unnumbered.is_some_and(|t| t.eq_ignore_ascii_case(name))
 }
 
 /// A VS Code window title (`file - folder - Visual Studio Code`, `folder (Workspace) - ...`) shows
@@ -546,6 +553,10 @@ mod tests {
         assert!(tab_is("◑ docs-writer", "docs-writer"));
         assert!(tab_is("✳ Fix login redirect loop", "Fix login redirect loop"));
         assert!(!tab_is("✳ api-server", "api-serve"));
+        assert!(tab_is("◑ app-claude (2)", "app-claude"));
+        assert!(tab_is("✳ Fix (old) bug (12)", "Fix (old) bug"));
+        assert!(!tab_is("✳ app-claude (x)", "app-claude"));
+        assert!(tab_is("✳ app-claude (x)", "app-claude (x)"));
     }
 
     #[test]
