@@ -1863,10 +1863,31 @@ fn tick(app: &mut App, cx: &mut Cx) {
     cx.after(root, TICK_MS, tick);
 }
 
+/// A click that could not be done, said in a toast at the bottom of the window for a few
+/// seconds; screen readers read it out.
+fn show_notice(app: &App, cx: &mut Cx, notice: &state::Notice) {
+    let text = match notice {
+        state::Notice::NoEditor => tr("No running VS Code detected.").to_string(),
+        state::Notice::NoTab => tr("Its terminal tab was not found.").to_string(),
+        state::Notice::Failed(why) => trf("That did not work: {why}", &[("why", why)]),
+    };
+    let toast = label(&text, 14)
+        .text_color(Color::WHITE)
+        .margin((16, 12, 16, 14))
+        .fill_x()
+        .accessibility_role(Aria::STATUS)
+        .accessibility_live(Aria::LIVE_POLITE)
+        .accessibility_label(text.clone());
+    cx.show_toast_content(app.shell, toast, 3500.0);
+}
+
 /// Copies the shared state when it changed; rebuilds the rows whose list changed.
 fn sync(app: &mut App, cx: &mut Cx) {
     let shared = app.shared.clone();
-    let st = shared.lock().unwrap();
+    let mut st = shared.lock().unwrap();
+    if let Some(notice) = st.notice.take() {
+        show_notice(app, cx, &notice);
+    }
     if st.version != app.seen {
         app.seen = st.version;
         app.sessions = st.sessions.clone();

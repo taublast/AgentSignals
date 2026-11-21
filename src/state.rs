@@ -108,6 +108,17 @@ pub struct Event {
     pub fired: String,
 }
 
+/// Why a session could not be brought forward or closed.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Notice {
+    /// A VS Code session, and no VS Code window has its folder open.
+    NoEditor,
+    /// A terminal session whose tab was not found.
+    NoTab,
+    /// The system refused or failed, in its own words.
+    Failed(String),
+}
+
 #[derive(Default)]
 pub struct State {
     /// Grows on every change; the UI rebuilds when it moved.
@@ -134,6 +145,9 @@ pub struct State {
     pub skipped_update: String,
     /// "Update and restart" under way, or why it failed.
     pub install: crate::update::Install,
+    /// A click the window asked for that could not be done, for a toast: what went wrong and the
+    /// system's words for it. The window takes it when it shows it.
+    pub notice: Option<Notice>,
     /// Settings (settings.json): "system", "dark" or "light"; a language code, empty for the
     /// system's; detect questions from the transcripts; check GitHub for new versions.
     pub theme: String,

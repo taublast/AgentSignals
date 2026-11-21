@@ -3,7 +3,7 @@
 //! window is minimized.
 
 use crate::restore::{self, Memory};
-use crate::state::{self, Action, Event, Session, Shared};
+use crate::state::{self, Action, Event, Notice, Session, Shared};
 use crate::platform::{self, Signals};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -267,12 +267,14 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<
             let editor = shared.lock().unwrap().sessions.iter().find(|s| s.vscode && s.name.eq_ignore_ascii_case(&name)).map(|s| s.cwd.clone());
             match editor {
                 Some(cwd) => {
-                    let fired = match platform::focus_editor(&cwd) {
-                        Ok(true) => "done".into(),
-                        Ok(false) => "no VS Code window with that folder".into(),
-                        Err(e) => e,
+                    let (fired, notice) = match platform::focus_editor(&cwd) {
+                        Ok(true) => ("done".into(), None),
+                        Ok(false) => ("no VS Code window with that folder".into(), Some(Notice::NoEditor)),
+                        Err(e) => (e.clone(), Some(Notice::Failed(e))),
                     };
-                    shared.lock().unwrap().log(Event { at_ms: state::now_ms(), pid: 0, session: name, kind: "focus".into(), busy_ms: 0, fired });
+                    let mut st = shared.lock().unwrap();
+                    st.notice = notice;
+                    st.log(Event { at_ms: state::now_ms(), pid: 0, session: name, kind: "focus".into(), busy_ms: 0, fired });
                 }
                 None => tab_command(signals, shared, name, "focus", Signals::focus_tab),
             }
@@ -297,12 +299,14 @@ fn command(signals: &Signals, shared: &Shared, memory: &mut Memory, tx: &Sender<
 fn tab_command(signals: &Signals, shared: &Shared, name: String, kind: &str, run: fn(&Signals, &str) -> Result<bool, String>) {
     let title = shared.lock().unwrap().sessions.iter().find(|s| s.name.eq_ignore_ascii_case(&name)).map(|s| s.title.clone());
     let tab = title.filter(|t| !t.is_empty()).unwrap_or_else(|| name.clone());
-    let fired = match run(signals, &tab) {
-        Ok(true) => "done".into(),
-        Ok(false) => "no terminal tab with that title".into(),
-        Err(e) => format!("failed: {e}"),
+    let (fired, notice) = match run(signals, &tab) {
+        Ok(true) => ("done".into(), None),
+        Ok(false) => ("no terminal tab with that title".into(), Some(Notice::NoTab)),
+        Err(e) => (format!("failed: {e}"), Some(Notice::Failed(e))),
     };
-    shared.lock().unwrap().log(Event { at_ms: state::now_ms(), pid: 0, session: name, kind: kind.into(), busy_ms: 0, fired });
+    let mut st = shared.lock().unwrap();
+    st.notice = notice;
+    st.log(Event { at_ms: state::now_ms(), pid: 0, session: name, kind: kind.into(), busy_ms: 0, fired });
 }
 
 /// Runs an action; returns what it did, errors included.
