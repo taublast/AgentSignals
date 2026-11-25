@@ -906,7 +906,7 @@ fn open_answers(app: &mut App, cx: &mut Cx) {
     let (id, live) = match &m.closed {
         Some(id) => (id.clone(), false),
         None => match app.sessions.iter().find(|s| s.name == m.name) {
-            Some(s) => (s.id.clone(), true),
+            Some(s) => (s.transcript_id().to_string(), true),
             None => return,
         },
     };

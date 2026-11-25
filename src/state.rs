@@ -8,6 +8,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type Shared = std::sync::Arc<std::sync::Mutex<State>>;
 
+impl Session {
+    /// The id of the transcript that holds the conversation now.
+    pub fn transcript_id(&self) -> &str {
+        if self.conversation.is_empty() { &self.id } else { &self.conversation }
+    }
+}
+
 /// One live Claude Code session, read from `~/.claude/sessions/<pid>.json`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Session {
@@ -26,6 +33,10 @@ pub struct Session {
     /// A background job (kind `bg`) no terminal tab shows any more: nothing to bring forward, it
     /// can only be stopped.
     pub background: bool,
+    /// The conversation's own id when it moved to a background job (the job's session id): its
+    /// transcript holds what the conversation does now. Empty: `id`.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub conversation: String,
     /// What its terminal tab shows when it has no name of its own (custom or AI title).
     pub title: String,
     /// Its Remote Control session id (claude.ai/code), when Remote Control is on.
@@ -545,7 +556,7 @@ mod tests {
     use super::*;
 
     fn s(pid: u32, status: &str, since_ms: u64) -> Session {
-        Session { pid, id: String::new(), name: format!("s{pid}"), named: true, interactive: true, vscode: false, background: false, title: String::new(), remote: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms }
+        Session { pid, id: String::new(), name: format!("s{pid}"), named: true, interactive: true, vscode: false, background: false, conversation: String::new(), title: String::new(), remote: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms }
     }
 
     fn map(list: &[Session]) -> HashMap<u32, Session> {

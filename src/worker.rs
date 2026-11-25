@@ -466,6 +466,10 @@ fn poll(dir: &PathBuf, files: &mut HashMap<PathBuf, (SystemTime, Parsed)>, has_t
         let (Some(job), Some(s)) = (job, seen.get_mut(&pid)) else { continue };
         let (status, waiting_for, since_ms) = jobs.get(&job).map(|(state, _)| state.clone()).unwrap_or_else(|| ("idle".into(), String::new(), s.since_ms));
         (s.status, s.waiting_for, s.since_ms) = (status, waiting_for, since_ms);
+        // Its questions and answers are in the job's transcript from now on.
+        if let Some((_, j)) = jobs.get(&job) {
+            s.conversation = j.id.clone();
+        }
         shown.insert(job);
     }
     // A job no terminal tab shows (its tab was closed) still runs and uses resources: it gets a row
@@ -572,6 +576,7 @@ fn session_of(v: &Value, pid: u32, background: bool) -> Session {
         interactive: matches!(text("kind").as_str(), "interactive" | "") && matches!(text("entrypoint").as_str(), "cli" | ""),
         vscode: text("entrypoint") == "claude-vscode",
         background,
+        conversation: String::new(),
         title,
         remote: text("bridgeSessionId"),
         status: status_of(v),
@@ -697,6 +702,8 @@ mod tests {
         assert_eq!(live.len(), 1);
         assert_eq!((live[&me].status.as_str(), live[&me].waiting_for.as_str(), live[&me].since_ms), ("waiting", "input needed", 7));
         assert!(!live[&me].background);
+        // Its questions are read from the job's transcript, where the conversation goes on.
+        assert_eq!(live[&me].transcript_id(), "b");
         // The terminal tab closed, the job runs on: the job gets a row of its own, marked background.
         let terminal = std::fs::read(dir.join(format!("{me}.json"))).unwrap();
         std::fs::remove_file(dir.join(format!("{me}.json"))).unwrap();

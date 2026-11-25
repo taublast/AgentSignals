@@ -32,8 +32,8 @@ impl Turns {
     /// one that ended with a question is `question` (the app's own status, apart from Claude Code's
     /// `waiting` for a permission dialog or an input prompt).
     pub fn apply(&mut self, sessions: &mut HashMap<u32, Session>) {
-        let ids: Vec<&String> = sessions.values().map(|s| &s.id).collect();
-        self.seen.retain(|id, _| ids.contains(&id));
+        let ids: Vec<&str> = sessions.values().map(|s| s.transcript_id()).collect();
+        self.seen.retain(|id, _| ids.contains(&id.as_str()));
         for s in sessions.values_mut().filter(|s| !s.id.is_empty() && s.status != "waiting") {
             let Some(Turn::Over { question, at_ms }) = self.turn(s) else { continue };
             match question {
@@ -51,19 +51,20 @@ impl Turns {
     }
 
     fn turn(&mut self, s: &Session) -> Option<Turn> {
-        let path = match self.seen.get(&s.id) {
+        let id = s.transcript_id().to_string();
+        let path = match self.seen.get(&id) {
             Some((path, ..)) => path.clone(),
-            None => transcript_path(&s.cwd, &s.id).or_else(|| crate::restore::transcript(&s.id))?,
+            None => transcript_path(&s.cwd, &id).or_else(|| crate::restore::transcript(&id))?,
         };
         let meta = std::fs::metadata(&path).ok()?;
         let (modified, len) = (meta.modified().ok()?, meta.len());
-        if let Some((_, m, l, turn)) = self.seen.get(&s.id) {
+        if let Some((_, m, l, turn)) = self.seen.get(&id) {
             if *m == modified && *l == len {
                 return turn.clone();
             }
         }
         let turn = read_tail(&path, len).map(|tail| last_turn(&tail));
-        self.seen.insert(s.id.clone(), (path, modified, len, turn.clone()));
+        self.seen.insert(id, (path, modified, len, turn.clone()));
         turn
     }
 }
@@ -232,7 +233,7 @@ mod tests {
     #[test]
     fn statuses_from_turns() {
         let mut turns = Turns::default();
-        let s = |status: &str| Session { pid: 1, id: "x".into(), name: "x".into(), named: true, interactive: true, vscode: false, background: false, title: String::new(), remote: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms: 5 };
+        let s = |status: &str| Session { pid: 1, id: "x".into(), name: "x".into(), named: true, interactive: true, vscode: false, background: false, conversation: String::new(), title: String::new(), remote: String::new(), status: status.into(), waiting_for: String::new(), cwd: String::new(), since_ms: 5 };
         let path = std::env::temp_dir().join(format!("agentsignals-test-{}-turn.jsonl", std::process::id()));
         std::fs::write(&path, r#"{"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Ready. Deploy now?"}]}}"#).unwrap();
         let meta = std::fs::metadata(&path).unwrap();
